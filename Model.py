@@ -80,6 +80,9 @@ class Model:
     def __init__(self, name, model, data, transform=None, ytransform = None, target_transform=None, eval_metrics=None):
         self.name = name
         self.model = model.to(device='cuda')
+        # accelerate trining speed
+        # self.model = torch.compile(self.model)
+        torch.set_float32_matmul_precision('high')
         self.transform = transform
         self.ytransform = ytransform
         if self.transform is None:
@@ -178,6 +181,7 @@ class Model:
         return self.model(data)
 
     def inference(self, testset):
+        self.model.eval()
         testset = self.preprocessing(testset)
         loader = DataLoader(dataset=testset,
                             batch_size=len(testset))
@@ -231,6 +235,10 @@ class Model:
         table.append(["Size (MB)", "", "", f"{size_all_mb:.3f}"])
         print(tabulate(table, headers=["", "Name",
                                        "Type", "Params"], tablefmt="psql", numalign="right"))
+    def save(self, name):
+        torch.save(self.model.state_dict(), name)
+    def load(self, name):
+        self.model.load_state_dict(torch.load(name))
 
 def stratified_sampling(dataset: Dataset, train_samples_per_class: int):
     import collections
@@ -284,7 +292,7 @@ def Hungarian_Order(g1b, g2b):
                 ix-jx).sum()
         row_ind, col_ind = linear_sum_assignment(T[idx])
         g2b[idx] = g2b[idx][col_ind]
-    
+
     return g2b
 
 class Datasetbehaviour():
@@ -295,7 +303,7 @@ class Datasetbehaviour():
         filepath = self.__get_filepath(key)
         try:
             obj = pickle.load(open(filepath, 'rb'))
-            print("- dataset loaded")
+            print(f"[dataset loaded] -- {filepath}")
             self.dataset = obj.dataset
         except FileNotFoundError:
             creater(*(args[:-1]))
@@ -306,7 +314,7 @@ class Datasetbehaviour():
             #     [torch.tensor(np.asarray(x)) for x in dataset[1]]))
             # self.dataset = TensorDataset(dataset[0], dataset[1])
             pickle.dump(self, open(filepath, 'wb'))
-            print("- dataset creation")
+            print("[dataset creation]")
 
     def __get_filepath(self, key: str):
         parent = Path("custom_datasets")
@@ -337,6 +345,10 @@ class Datasetbehaviour():
                             np.asarray(dataset[j][i][k]))
                 else:
                     dataset[j][i] = torch.tensor(np.asarray(dataset[j][i]))
+    def union(self, instance):
+        self.dataset[0] += instance.dataset[0]
+        self.dataset[1] += instance.dataset[1]
+        return self
 
 
 class PositionalEncoding(nn.Module):
