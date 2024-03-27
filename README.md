@@ -1,2 +1,1 @@
 # ViT-Schematic
-# ViT-Schematic
