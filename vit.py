@@ -65,6 +65,7 @@ class Attention(nn.Module):
 
         out = torch.matmul(attn, v)
         out = rearrange(out, 'b h n d -> b n (h d)')
+        
         return self.to_out(out)
 
 

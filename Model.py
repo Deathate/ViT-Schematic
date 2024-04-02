@@ -26,7 +26,7 @@ from itertools import count
 import pickle
 from sklearn.metrics import classification_report
 from sklearn.metrics import accuracy_score
-import tqdm
+from tqdm.std import tqdm
 from pathlib import Path
 import os
 from torchmetrics import Accuracy
@@ -125,10 +125,10 @@ class Model:
         start = self.ep
         end = self.ep + epochs
 
-        early_stopping_monitor = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=20)
+        early_stopping_monitor = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=15)
         for ep in range(start, end):
             self.model.train()
-            with tqdm.tqdm(total=len(train_loader), bar_format='{desc}{n_fmt}/{total_fmt}|{bar}| - {elapsed}s{postfix}') as pbar:
+            with tqdm(total=len(train_loader), bar_format='{desc}{n_fmt}/{total_fmt}|{bar}| - {elapsed}s{postfix}') as pbar:
                 pbar.set_description(f"Epoch {ep+1}/{end}")
                 train_loss = []
                 for (data, target) in train_loader:

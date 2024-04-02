@@ -23,3 +23,5 @@ L3P6_R[[:space:]]copy.ipynb filter=lfs diff=lfs merge=lfs -text
 custom_datasets/DoubleLineFormalDataset_d083c25c366a765316131b2adbb65827022ae0a358214d956ccbd25d53879e4d.pkl filter=lfs diff=lfs merge=lfs -text
 custom_datasets/DoubleLineFormalDataset_ffa6a3bfbc2b238f219af985ecdf9f4f4c30b425b134118d5092edfa71a4b05c.pkl filter=lfs diff=lfs merge=lfs -text
 custom_datasets/DoubleLineFormalDataset_208c7088eb203320d9c1996b5e36e7841dacc4e8d4e0ec9753c2a6f89bae5cfc.pkl filter=lfs diff=lfs merge=lfs -text
+complete/L3P2-6.ipynb filter=lfs diff=lfs merge=lfs -text
+custom_datasets/DoubleLineFormalDataset_244b1eeb50a0dd2a68f4ee5432451cbba61b94a635f393027411d4560a90822f.pkl filter=lfs diff=lfs merge=lfs -text
