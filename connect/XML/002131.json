@@ -1,0 +1,179 @@
+{
+  "version": "5.4.1",
+  "flags": {},
+  "shapes": [
+    {
+      "flag": {},
+      "label": "inductor",
+      "points": [
+        [
+          68.0,
+          61.0
+        ],
+        [
+          148.0,
+          140.0
+        ]
+      ],
+      "group_id": 0,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "flag": {},
+      "label": "capacity",
+      "points": [
+        [
+          329.0,
+          223.0
+        ],
+        [
+          377.0,
+          258.0
+        ]
+      ],
+      "group_id": 1,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "flag": {},
+      "label": "capacity",
+      "points": [
+        [
+          169.0,
+          320.0
+        ],
+        [
+          205.0,
+          368.0
+        ]
+      ],
+      "group_id": 2,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "flag": {},
+      "label": "nmos",
+      "points": [
+        [
+          214.0,
+          205.0
+        ],
+        [
+          280.0,
+          269.0
+        ]
+      ],
+      "group_id": 3,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "flag": {},
+      "label": "resistor",
+      "points": [
+        [
+          47.0,
+          38.0
+        ],
+        [
+          101.0,
+          83.0
+        ]
+      ],
+      "group_id": 4,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          59.12080536912748,
+          77.63758389261746
+        ],
+        [
+          84.62416107382549,
+          126.63087248322148
+        ],
+        [
+          221.8724832214765,
+          239.04697986577182
+        ],
+        [
+          175.5637583892617,
+          344.751677852349
+        ]
+      ],
+      "group_id": null,
+      "description": "4, 0, 3, 2; 0, 0, 1, 0",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          89.65771812080536,
+          46.76510067114095
+        ],
+        [
+          135.96644295302013,
+          74.95302013422818
+        ],
+        [
+          274.55704697986573,
+          222.26845637583892
+        ],
+        [
+          353.08053691275165,
+          229.6510067114094
+        ]
+      ],
+      "group_id": null,
+      "description": "4, 0, 3, 1; 1, 1, 0, 0",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          274.2214765100671,
+          255.82550335570468
+        ],
+        [
+          199.05369127516775,
+          343.74496644295306
+        ],
+        [
+          353.08053691275165,
+          253.81208053691276
+        ]
+      ],
+      "group_id": null,
+      "description": "3, 2, 1; 2, 1, 1",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
+    }
+  ],
+  "imagePath": "..\\002131.jpg",
+  "imageData": null,
+  "imageHeight": 414,
+  "imageWidth": 432
+}

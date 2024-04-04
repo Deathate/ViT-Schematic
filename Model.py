@@ -4,7 +4,8 @@ from torchmetrics.classification import MulticlassAccuracy
 from tabulate import tabulate
 import inspect
 import IPython
-import einops
+from einops import rearrange, repeat
+from einops.layers.torch import Rearrange
 import secrets
 import p_tqdm
 import collections.abc as abc
@@ -20,6 +21,7 @@ import io
 from PIL import Image
 import shapely
 import cv2 as cv
+import cv2
 from utility import *
 from functools import partial
 from itertools import count
@@ -42,13 +44,14 @@ import torch
 import logging
 import hashlib
 import seaborn
-
+import textwrap
 from visualizer import get_local
-# get_local.activate()
-
-
+import textwrap
+import random
+import itertools
 def select_gpu_with_most_free_memory():
-    print("#"*50)
+    print()
+    print("#" * 50)
     import pynvml
     pynvml.nvmlInit()
     deviceCount = pynvml.nvmlDeviceGetCount()
@@ -60,37 +63,98 @@ def select_gpu_with_most_free_memory():
         handle = pynvml.nvmlDeviceGetHandleByIndex(i)
         info = pynvml.nvmlDeviceGetMemoryInfo(handle)
         print("- DEVICE:", i)
-        print(f"  TOTAL:", int(info.total/1024**2),
-              ", FREE:", int(info.free/1024**2))
+        print(f"  TOTAL:", int(info.total / 1024**2),
+              ", FREE:", int(info.free / 1024**2))
         if info.free > memory:
             memory = info.free
             device = i
     os.environ["CUDA_VISIBLE_DEVICES"] = str(device)
     print(f"Using GPU: [{device}]")
-    print("#"*50)
+    print("#" * 50)
     print()
-    torch.set_default_device('cuda')
 
 
-select_gpu_with_most_free_memory()
 rng = np.random.default_rng()
 
 
+class Datasetbehaviour():
+    def __init__(self, size, creater: callable, *args):
+        key = inspect.getsource(type(self)) + str(args) + str(size)
+        filepath = self.__get_filepath(key)
+        self.filepath = str(filepath)
+        print("[dataset creation]")
+        if filepath.exists() and not getattr(self, "RESET", False):
+            print(f"[cache found]:")
+            print(textwrap.fill(self.filepath, 70, initial_indent=" " * 4))
+            obj = pickle.load(open(filepath, 'rb'))
+            self.dataset = obj.dataset
+        else:
+            if not getattr(self, "MP", False):
+                dataset = []
+                for _ in tqdm(range(size)):
+                    dataset.append(creater(*args))
+            else:
+                dataset = p_tqdm.p_umap(lambda _:creater(*args), range(size))
+            self.dataset = list(map(list, zip(*dataset)))
+            pickle.dump(self, open(filepath, 'wb'))
+        print()
+    def __get_filepath(self, key: str):
+        class_name = type(self).__name__
+        parent = Path("custom_datasets") / Path(class_name)
+        parent.mkdir(parents=True, exist_ok=True)
+        id = hashlib.sha256(key.encode("utf-8")).hexdigest()
+        file = Path(class_name + "_" + id + ".pkl")
+        return parent / file
+
+    def __getitem__(self, idx):
+        return self.dataset[0][idx], self.dataset[1][idx]
+
+    def __len__(self):
+        return len(self.dataset[0])
+
+    def save_params(self):
+        frame = inspect.currentframe()
+        args, _, _, values = inspect.getargvalues(frame)
+        print(args)
+        arg_values = {arg: values[arg] for arg in set(args) - set(['self'])}
+        for arg in arg_values:
+            setattr(self, arg, arg_values[arg])
+
+    def to_tensor(self, dataset, shape=(1, 1)):
+        for i in range(len(dataset[0])):
+            for j in range(len(shape)):
+                if shape[j] > 1:
+                    for k in range(shape[j]):
+                        dataset[j][i][k] = torch.tensor(
+                            np.asarray(dataset[j][i][k]))
+                else:
+                    dataset[j][i] = torch.tensor(np.asarray(dataset[j][i]))
+
+    def union(self, instance):
+        self.dataset[0] += instance.dataset[0]
+        self.dataset[1] += instance.dataset[1]
+        return self
 class Model:
-    def __init__(self, name, model, data, transform=None, ytransform = None, target_transform=None, eval_metrics=None):
+    def __init__(self, name, data, transform=None, ytransform=None, target_transform=None, eval_metrics=None, batch_size=64, validation_split=0.1, shuffle=False):
         self.name = name
-        self.model = model.to(device='cuda')
-        # accelerate trining speed
-        # self.model = torch.compile(self.model)
-        torch.set_float32_matmul_precision('high')
         self.transform = transform
         self.ytransform = ytransform
         if self.transform is None:
             self.transform = lambda x: torch.tensor(x).float()
         if self.ytransform is None:
             self.ytransform = lambda x: torch.tensor(x).float()
-        self.dataset = self.preprocessing(
-            data)
+        select_gpu_with_most_free_memory()
+        # torch.set_default_device('cuda')
+
+        dataset = self.preprocessing(data)
+        generator = torch.Generator(device='cpu')
+        train_dataset, test_dataset = torch.utils.data.random_split(dataset, [tn := int(
+            len(dataset) * (1 - validation_split)), len(dataset) - tn], generator=generator)
+
+        self.train_loader = DataLoader(dataset=train_dataset,
+                                       batch_size=batch_size, shuffle=shuffle, generator=generator)
+        self.test_loader = DataLoader(dataset=test_dataset,
+                                      batch_size=batch_size, generator=generator)
         self.target_transform = target_transform
         self.writer = SummaryWriter(comment=self.name)
         layout = {
@@ -102,36 +166,54 @@ class Model:
         self.writer.add_custom_scalars(layout)
         self.ep = 0
         self.eval_metrics = eval_metrics
+        torch.cuda.empty_cache()
+
+    def preprocessing(self, data: Datasetbehaviour):
+        print("[data preprocessing]")
+        transform_id = data.filepath
+        try:
+            transform_id += inspect.getsource(self.transform)
+        except:
+            transform_id += str(self.transform)
+        try:
+            transform_id += inspect.getsource(self.ytransform)
+        except:
+            transform_id += str(self.transform)
+        transform_id = transform_id.encode("utf-8")
+        filepath = Path("preprocessed_datasets") / Path(type(data).__name__) / \
+            Path(hashlib.sha256(transform_id).hexdigest())
+        if filepath.exists():
+            print("[cache found]:")
+            print(textwrap.fill(str(filepath), 70, initial_indent=" " * 4))
+            result = pickle.load(open(filepath, 'rb'))
+        else:
+            filepath.parent.mkdir(parents=True, exist_ok=True)
+            result = [[self.transform(x[0]), self.ytransform(x[1])]
+                      for x in tqdm(data)]
+            pickle.dump(result, open(filepath, 'wb'))
+        result = [[x[0].cuda(), x[1].cuda()] for x in result]
+        print()
+        return result
+
+    def fit(self, model, criterion, optimizer, epochs=1):
+        self.model = model.to(device='cuda')
         self.model_overview(self.model)
-
-    def preprocessing(self, data: list):
-        dataset = []
-        for i in range(len(data)):
-            x = data[i][0]
-            y = data[i][1]
-            dataset.append((self.transform(x), self.ytransform(y)))
-
-        return dataset
-
-    def fit(self, criterion, optimizer, epochs=1, batch_size=64, validation_split=0.1, validation_freq=1, shuffle=False):
-        generator = torch.Generator(device='cuda')
-        train_dataset, test_dataset = torch.utils.data.random_split(self.dataset, [tn := int(
-            len(self.dataset)*(1-validation_split)), len(self.dataset)-tn], generator=generator)
-
-        train_loader = DataLoader(dataset=train_dataset,
-                                       batch_size=batch_size, shuffle=shuffle, generator=generator)
-        test_loader = DataLoader(dataset=test_dataset,
-                                      batch_size=batch_size, generator=generator)
+        # accelerate trining speed
+        # self.model = torch.compile(self.model)
+        torch.set_float32_matmul_precision('high')
         start = self.ep
         end = self.ep + epochs
 
-        early_stopping_monitor = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=15)
+        early_stopping_monitor = optim.lr_scheduler.ReduceLROnPlateau(
+            optimizer, patience=15)
         for ep in range(start, end):
             self.model.train()
-            with tqdm(total=len(train_loader), bar_format='{desc}{n_fmt}/{total_fmt}|{bar}| - {elapsed}s{postfix}') as pbar:
+            with tqdm(total=len(self.train_loader), bar_format='{desc}{n_fmt}/{total_fmt}|{bar}| - {elapsed}s{postfix}') as pbar:
                 pbar.set_description(f"Epoch {ep+1}/{end}")
                 train_loss = []
-                for (data, target) in train_loader:
+                pbar.set_postfix(
+                    {"loss": "---", "acc": "---"})
+                for (data, target) in self.train_loader:
                     y_hat = self.model(data)
                     try:
                         loss = self.loss(
@@ -140,8 +222,6 @@ class Model:
                         loss.backward()
                         optimizer.step()
                         train_loss.append(loss)
-                        pbar.set_postfix(
-                            {"loss": f"{loss:.3f}", "acc": f"{0:.3f}"})
                         pbar.update(1)
                     except Exception as e:
                         # print("Error in loss calculation", e)
@@ -153,20 +233,21 @@ class Model:
 
                 train_loss = torch.stack(train_loss).mean()
                 self.writer.add_scalar(
-                    "loss/train", train_loss, ep+1)
+                    "loss/train", train_loss, ep + 1)
 
                 # calculate validation loss
                 self.model.eval()
                 val_loss = []
-                for (data, target) in test_loader:
+                for (data, target) in self.test_loader:
                     y_hat = self.predict(
                         data)
-                    val_loss.append(self.loss(y_hat, target, criterion, eval=True))
+                    val_loss.append(
+                        self.loss(y_hat, target, criterion, eval=True))
                 val_loss = torch.stack(val_loss).mean()
                 self.writer.add_scalar(
-                    "loss/validation", val_loss, ep+1)
+                    "loss/validation", val_loss, ep + 1)
                 pbar.set_postfix(
-                    {"loss": f"{train_loss:.3f}", "acc": f"{val_loss:.3f}"})
+                    {"loss": f"{train_loss:.3E}", "acc": f"{val_loss:.3E}"})
 
                 early_stopping_monitor.step(train_loss)
                 if early_stopping_monitor.num_bad_epochs >= early_stopping_monitor.patience:
@@ -174,12 +255,12 @@ class Model:
                     break
         self.ep = end
         print("----------- Training finished -----------")
-        torch.cuda.empty_cache()
 
     @torch.no_grad()
     def predict(self, data: torch.tensor):
         return self.model(data)
 
+    @torch.no_grad()
     def inference(self, testset):
         self.model.eval()
         testset = self.preprocessing(testset)
@@ -187,7 +268,8 @@ class Model:
                             batch_size=len(testset))
         x = next(iter(loader))[0]
         y = next(iter(loader))[1]
-        return self.predict(x).cpu(), y.cpu()
+        return x, self.predict(x).cpu(), y.cpu()
+
     def loss(self, y_hat, y, criterion, eval):
         if self.target_transform:
             y = self.target_transform(y_hat, y)
@@ -195,12 +277,6 @@ class Model:
             return self.eval_metrics(y_hat, y)
         else:
             return criterion(y_hat, y)
-
-    def __getitem__(self, idx):
-        return self.dataset[idx]
-
-    def __del__(self):
-        self.writer.close()
 
     @property
     def weight(self):
@@ -235,11 +311,17 @@ class Model:
         table.append(["Size (MB)", "", "", f"{size_all_mb:.3f}"])
         print(tabulate(table, headers=["", "Name",
                                        "Type", "Params"], tablefmt="psql", numalign="right"))
+
     def save(self, name):
         torch.save(self.model.state_dict(), name)
+
     def load(self, name):
         self.model.load_state_dict(torch.load(name))
 
+    def first(self):
+        return next(iter(self.train_loader))[0][0].cpu()
+    def gc(self):
+        torch.cuda.empty_cache()
 def stratified_sampling(dataset: Dataset, train_samples_per_class: int):
     import collections
     train_indices = []
@@ -284,71 +366,17 @@ def stratified_sampling(dataset: Dataset, train_samples_per_class: int):
 def Hungarian_Order(g1b, g2b):
     from scipy.optimize import linear_sum_assignment
     # cost matrix
-    T=np.zeros((len(g1b),len(g1b[0]),len(g1b[0])))
+    T = np.zeros((len(g1b), len(g1b[0]), len(g1b[0])))
     for idx, (g1, g2) in enumerate(zip(torch.as_tensor(g1b), torch.as_tensor(g2b))):
         for i, ix in enumerate(g1):
             for j, jx in enumerate(g2):
                 T[idx][i][j] = torch.square(
-                ix-jx).sum()
+                    ix - jx).sum()
         row_ind, col_ind = linear_sum_assignment(T[idx])
         g2b[idx] = g2b[idx][col_ind]
 
     return g2b
 
-class Datasetbehaviour():
-    def __init__(self, creater: callable, *args):
-        self.dataid = args[-1]
-        # self.shapeid = args[-1]
-        key = inspect.getsource(creater)+str(args)
-        filepath = self.__get_filepath(key)
-        try:
-            obj = pickle.load(open(filepath, 'rb'))
-            print(f"[dataset loaded] -- {filepath}")
-            self.dataset = obj.dataset
-        except FileNotFoundError:
-            creater(*(args[:-1]))
-            dataset = getattr(self, self.dataid)
-            self.dataset = list(map(list, zip(*dataset)))
-            # self.to_tensor(self.dataset, getattr(self, self.shapeid))
-            # dataset = (torch.stack([torch.tensor(np.asarray(x)) for x in dataset[0]]), torch.stack(
-            #     [torch.tensor(np.asarray(x)) for x in dataset[1]]))
-            # self.dataset = TensorDataset(dataset[0], dataset[1])
-            pickle.dump(self, open(filepath, 'wb'))
-            print("[dataset creation]")
-
-    def __get_filepath(self, key: str):
-        parent = Path("custom_datasets")
-        parent.mkdir(parents=True, exist_ok=True)
-        class_name = type(self).__name__
-        id = hashlib.sha256(key.encode("utf-8")).hexdigest()
-        file = Path(class_name + "_" + id + ".pkl")
-        return parent / file
-
-    def __getitem__(self, idx):
-        return self.dataset[0][idx], self.dataset[1][idx]
-    def __len__(self):
-        return len(self.dataset[0])
-
-    def save_params(self):
-        frame = inspect.currentframe()
-        args, _, _, values = inspect.getargvalues(frame)
-        print(args)
-        arg_values = {arg: values[arg] for arg in set(args) - set(['self'])}
-        for arg in arg_values:
-            setattr(self, arg, arg_values[arg])
-    def to_tensor(self, dataset, shape=(1,1)):
-        for i in range(len(dataset[0])):
-            for j in range(len(shape)):
-                if shape[j] > 1:
-                    for k in range(shape[j]):
-                        dataset[j][i][k] = torch.tensor(
-                            np.asarray(dataset[j][i][k]))
-                else:
-                    dataset[j][i] = torch.tensor(np.asarray(dataset[j][i]))
-    def union(self, instance):
-        self.dataset[0] += instance.dataset[0]
-        self.dataset[1] += instance.dataset[1]
-        return self
 
 
 class PositionalEncoding(nn.Module):
@@ -375,29 +403,36 @@ class PositionalEncoding(nn.Module):
 
     def forward(self, x):
         return self.pe[:, :x.size(1)]
+
+
 def plotly_to_array(fig):
     image_bytes = fig.to_image(format="jpg")
     return np.asarray(Image.open(io.BytesIO(image_bytes)))
+
+
 def seaborn_to_array(fig):
     return np.asarray(fig.get_figure().canvas.buffer_rgba())
+
+
 def visualize_attentions(maps):
     map_num = len(maps[0]) - 1
-    fig = make_subplots(rows=1, cols=map_num+1,horizontal_spacing=0)
+    fig = make_subplots(rows=1, cols=map_num + 1, horizontal_spacing=0)
 
     for i in range(len(maps)):
-        for j in range(1, map_num+1):
-            fig.add_heatmap(z=maps[i][j],visible=False,row=1,col=j,showscale=True if j==1 else False)
-        fig.add_image(z=maps[i][0],visible=False,row=1, col=map_num+1)
-    for i in range(map_num+1):
+        for j in range(1, map_num + 1):
+            fig.add_heatmap(z=maps[i][j], visible=False, row=1,
+                            col=j, showscale=True if j == 1 else False)
+        fig.add_image(z=maps[i][0], visible=False, row=1, col=map_num + 1)
+    for i in range(map_num + 1):
         fig.data[i].visible = True
     steps = []
-    for i in range(0, len(fig.data), map_num+1):
+    for i in range(0, len(fig.data), map_num + 1):
         step = dict(
             method="update",
             args=[{"visible": [False] * len(fig.data)}],
         )
-        for j in range(map_num+1):
-            step["args"][0]["visible"][i+j] = True
+        for j in range(map_num + 1):
+            step["args"][0]["visible"][i + j] = True
         steps.append(step)
     sliders = [dict(
         active=10,
@@ -405,13 +440,22 @@ def visualize_attentions(maps):
         pad={"t": 50},
         steps=steps
     )]
-    for i in range(map_num+1):
-        fig.update_xaxes(showgrid=False,zeroline=False,visible=False)
-    for i in range(map_num+1):
-        fig.update_yaxes(row=1, col=i+1, autorange="reversed", scaleanchor=f"x{i+1}", scaleratio=1,showgrid=False,zeroline=False,visible=False)
+    for i in range(map_num + 1):
+        fig.update_xaxes(showgrid=False, zeroline=False, visible=False)
+    for i in range(map_num + 1):
+        fig.update_yaxes(row=1, col=i + 1, autorange="reversed",
+                         scaleanchor=f"x{i+1}", scaleratio=1, showgrid=False, zeroline=False, visible=False)
     fig.update_layout(
         sliders=sliders,
         plot_bgcolor='white',
         # autosize = False
     )
     fig.show()
+def flatten_list(x):
+    return [*itertools.chain.from_iterable(x)]
+def plot_images(images, img_width=None,flatten=False):
+    if not isinstance(images, list):
+        images = [images]
+    if flatten:
+        images = flatten_list(images)
+    ipyplot.plot_images(images, img_width=img_width if img_width else max(*images[0].shape))

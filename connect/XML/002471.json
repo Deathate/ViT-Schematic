@@ -1,0 +1,244 @@
+{
+  "version": "5.4.1",
+  "flags": {},
+  "shapes": [
+    {
+      "flag": {},
+      "label": "gnd",
+      "points": [
+        [
+          584.0,
+          503.0
+        ],
+        [
+          672.0,
+          547.0
+        ]
+      ],
+      "group_id": 0,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "flag": {},
+      "label": "resistor",
+      "points": [
+        [
+          661.0,
+          179.0
+        ],
+        [
+          772.0,
+          237.0
+        ]
+      ],
+      "group_id": 1,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "flag": {},
+      "label": "resistor",
+      "points": [
+        [
+          661.0,
+          312.0
+        ],
+        [
+          773.0,
+          372.0
+        ]
+      ],
+      "group_id": 2,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "flag": {},
+      "label": "resistor",
+      "points": [
+        [
+          966.0,
+          48.0
+        ],
+        [
+          1085.0,
+          107.0
+        ]
+      ],
+      "group_id": 3,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "flag": {},
+      "label": "op",
+      "points": [
+        [
+          258.0,
+          80.0
+        ],
+        [
+          511.0,
+          334.0
+        ]
+      ],
+      "group_id": 4,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "flag": {},
+      "label": "op",
+      "points": [
+        [
+          917.0,
+          148.0
+        ],
+        [
+          1172.0,
+          400.0
+        ]
+      ],
+      "group_id": 5,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          273.91420118343194,
+          144.5059171597633
+        ],
+        [
+          497.58284023668637,
+          210.18639053254438
+        ],
+        [
+          671.5473372781065,
+          210.18639053254438
+        ]
+      ],
+      "group_id": null,
+      "description": "4, 4, 1; 1, 2, 0",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          12.967455621301754,
+          275.86686390532543
+        ],
+        [
+          273.91420118343194,
+          277.0502958579882
+        ]
+      ],
+      "group_id": null,
+      "description": "-1, 4; -1, 0",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          628.3520710059172,
+          516.6952662721894
+        ],
+        [
+          670.3639053254437,
+          341.5473372781065
+        ]
+      ],
+      "group_id": null,
+      "description": "0, 2; 0, 0",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          762.0798816568047,
+          342.13905325443784
+        ],
+        [
+          935.4526627218935,
+          342.73076923076917
+        ]
+      ],
+      "group_id": null,
+      "description": "2, 5; 0, 0",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          762.6715976331361,
+          209.594674556213
+        ],
+        [
+          936.0443786982248,
+          210.18639053254438
+        ],
+        [
+          978.0562130177515,
+          77.05029585798815
+        ]
+      ],
+      "group_id": null,
+      "description": "1, 5, 3; 1, 1, 0",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          1069.7721893491125,
+          77.6420118343195
+        ],
+        [
+          1372.1390532544378,
+          276.45857988165676
+        ],
+        [
+          1156.7544378698226,
+          275.86686390532543
+        ]
+      ],
+      "group_id": null,
+      "description": "3, -1, 5; 1, -1, 2",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
+    }
+  ],
+  "imagePath": "..\\002471.jpg",
+  "imageData": null,
+  "imageHeight": 547,
+  "imageWidth": 1407
+}

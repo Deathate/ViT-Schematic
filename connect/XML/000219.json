@@ -1,0 +1,359 @@
+{
+  "version": "5.4.1",
+  "flags": {},
+  "shapes": [
+    {
+      "flag": {},
+      "label": "pmos",
+      "points": [
+        [
+          64.0,
+          73.0
+        ],
+        [
+          110.0,
+          121.0
+        ]
+      ],
+      "group_id": 0,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "flag": {},
+      "label": "pmos",
+      "points": [
+        [
+          134.0,
+          73.0
+        ],
+        [
+          180.0,
+          121.0
+        ]
+      ],
+      "group_id": 1,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "flag": {},
+      "label": "pmos",
+      "points": [
+        [
+          240.0,
+          74.0
+        ],
+        [
+          286.0,
+          122.0
+        ]
+      ],
+      "group_id": 2,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "flag": {},
+      "label": "pmos",
+      "points": [
+        [
+          345.0,
+          72.0
+        ],
+        [
+          391.0,
+          120.0
+        ]
+      ],
+      "group_id": 3,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "flag": {},
+      "label": "nmos",
+      "points": [
+        [
+          346.0,
+          177.0
+        ],
+        [
+          392.0,
+          225.0
+        ]
+      ],
+      "group_id": 4,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "flag": {},
+      "label": "nmos",
+      "points": [
+        [
+          345.0,
+          283.0
+        ],
+        [
+          391.0,
+          331.0
+        ]
+      ],
+      "group_id": 5,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "flag": {},
+      "label": "nmos",
+      "points": [
+        [
+          135.0,
+          230.0
+        ],
+        [
+          181.0,
+          278.0
+        ]
+      ],
+      "group_id": 6,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "flag": {},
+      "label": "current",
+      "points": [
+        [
+          40.0,
+          275.0
+        ],
+        [
+          99.49999999999999,
+          337.66666666666663
+        ]
+      ],
+      "group_id": 7,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "flag": {},
+      "label": "gnd",
+      "points": [
+        [
+          210.0,
+          364.0
+        ],
+        [
+          246.0,
+          394.0
+        ]
+      ],
+      "group_id": 8,
+      "description": "",
+      "shape_type": "rectangle",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          70.16666666666667,
+          80.33333333333333
+        ],
+        [
+          175.16666666666663,
+          80.33333333333333
+        ],
+        [
+          280.5,
+          81.0
+        ],
+        [
+          386.16666666666663,
+          81.0
+        ],
+        [
+          227.16666666666663,
+          28.333333333333332
+        ]
+      ],
+      "group_id": null,
+      "description": "0, 1, 2, 3, -1; 2, 2, 2, 2, -1",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          103.83333333333333,
+          96.66666666666666
+        ],
+        [
+          141.16666666666669,
+          97.0
+        ],
+        [
+          245.83333333333331,
+          97.0
+        ],
+        [
+          350.8333333333333,
+          96.33333333333333
+        ],
+        [
+          69.83333333333333,
+          278.66666666666663
+        ],
+        [
+          70.16666666666667,
+          113.0
+        ]
+      ],
+      "group_id": null,
+      "description": "0, 1, 2, 3, 7, 0; 1, 1, 1, 1, 0, 0",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          174.5,
+          113.0
+        ],
+        [
+          350.16666666666663,
+          201.33333333333334
+        ],
+        [
+          174.83333333333331,
+          236.66666666666669
+        ],
+        [
+          140.5,
+          255.0
+        ]
+      ],
+      "group_id": null,
+      "description": "1, 4, 6, 6; 0, 1, 0, 1",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          279.8333333333333,
+          112.33333333333333
+        ],
+        [
+          385.8333333333333,
+          218.0
+        ],
+        [
+          386.16666666666663,
+          290.66666666666663
+        ]
+      ],
+      "group_id": null,
+      "description": "2, 4, 5; 0, 2, 0",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          385.16666666666663,
+          113.66666666666666
+        ],
+        [
+          386.16666666666663,
+          186.0
+        ],
+        [
+          418.8333333333333,
+          148.0
+        ]
+      ],
+      "group_id": null,
+      "description": "3, 4, -1; 0, 0, -1",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          350.8333333333333,
+          306.66666666666663
+        ],
+        [
+          299.8333333333333,
+          307.0
+        ]
+      ],
+      "group_id": null,
+      "description": "5, -1; 1, -1",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          385.16666666666663,
+          323.3333333333333
+        ],
+        [
+          227.83333333333331,
+          375.0
+        ],
+        [
+          68.83333333333333,
+          334.66666666666663
+        ],
+        [
+          174.5,
+          270.66666666666663
+        ]
+      ],
+      "group_id": null,
+      "description": "5, 8, 7, 6; 2, 0, 1, 2",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
+    }
+  ],
+  "imagePath": "..\\000219.jpg",
+  "imageData": null,
+  "imageHeight": 411,
+  "imageWidth": 478
+}
