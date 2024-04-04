@@ -3,22 +3,22 @@ from Model import *
 from createdata import MessyDataset
 
 width = 200
-d = MessyDataset(20000)
-# %%
-plot_images([d[i] for i in range(5)] , flatten=True, img_width=150)
+Datasetbehaviour.MP = True
+d = MessyDataset(1000)
+plot_images(d.head() , flatten=True, img_width=150)
 # %%
 transform = transforms.Compose([
     transforms.ToImage(),
     transforms.Resize((width, width)),
+    transforms.Grayscale(),
     transforms.ToDtype(torch.float32, scale=True),
 ])
 model = Model("autoencoder",
-              data=d, transform=transform, ytransform=transform, batch_size=256)
+              data=d, transform=transform, ytransform=transform, batch_size=512)
+# plot_images(model.head())
+#%%
+plot_images(model.head(), flatten=True, img_width=150)
 # %%
-transforms.ToPILImage()(model.first())
-# %%
-
-
 class Autoencoder(nn.Module):
     def __init__(self):
         super(Autoencoder, self).__init__()
@@ -59,7 +59,7 @@ class Autoencoder(nn.Module):
 m = Autoencoder()
 model.gc()
 model.fit(m, nn.MSELoss(), optim.Adam(
-    m.parameters(), lr=0.001), epochs=500)
+    m.parameters(), lr=1e-4), epochs=5000)
 # %%
 d2 = MessyDataset(10)
 result = model.inference(d2)

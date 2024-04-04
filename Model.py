@@ -79,25 +79,13 @@ rng = np.random.default_rng()
 
 class Datasetbehaviour():
     def __init__(self, size, creater: callable, *args):
+        self.size = size
+        self.creater = creater
+        self.args = args
         key = inspect.getsource(type(self)) + str(args) + str(size)
         filepath = self.__get_filepath(key)
         self.filepath = str(filepath)
-        print("[dataset creation]")
-        if filepath.exists() and not getattr(self, "RESET", False):
-            print(f"[cache found]:")
-            print(textwrap.fill(self.filepath, 70, initial_indent=" " * 4))
-            obj = pickle.load(open(filepath, 'rb'))
-            self.dataset = obj.dataset
-        else:
-            if not getattr(self, "MP", False):
-                dataset = []
-                for _ in tqdm(range(size)):
-                    dataset.append(creater(*args))
-            else:
-                dataset = p_tqdm.p_umap(lambda _:creater(*args), range(size))
-            self.dataset = list(map(list, zip(*dataset)))
-            pickle.dump(self, open(filepath, 'wb'))
-        print()
+        self.dataset = None
     def __get_filepath(self, key: str):
         class_name = type(self).__name__
         parent = Path("custom_datasets") / Path(class_name)
@@ -106,10 +94,37 @@ class Datasetbehaviour():
         file = Path(class_name + "_" + id + ".pkl")
         return parent / file
 
+    def head(self):
+        dataset = []
+        for _ in range(5):
+            dataset.append(self.creater(*self.args))
+        return list(zip(*dataset))
+    def __load(self):
+        print("[dataset creation]")
+        if Path(self.filepath).exists() and not getattr(self, "RESET", False):
+            print(f"[cache found]:")
+            print(textwrap.fill(self.filepath, 70, initial_indent=" " * 4))
+            obj = pickle.load(open(self.filepath, 'rb'))
+            self.dataset = obj.dataset
+        else:
+            if not getattr(self, "MP", False):
+                dataset = []
+                for _ in tqdm(range(self.size)):
+                    dataset.append(self.creater(*self.args))
+            else:
+                dataset = p_tqdm.p_umap(lambda _: self.creater(*self.args), range(self.size))
+            self.dataset = list(map(list, zip(*dataset)))
+            pickle.dump(self, open(self.filepath, 'wb'))
+        print("--- [finish creation] ---\n")
+        self.loaded = True
     def __getitem__(self, idx):
+        if not self.dataset:
+            self.__load()
         return self.dataset[0][idx], self.dataset[1][idx]
 
     def __len__(self):
+        if not self.dataset:
+            self.__load()
         return len(self.dataset[0])
 
     def save_params(self):
@@ -192,7 +207,7 @@ class Model:
                       for x in tqdm(data)]
             pickle.dump(result, open(filepath, 'wb'))
         result = [[x[0].cuda(), x[1].cuda()] for x in result]
-        print()
+        print("--- [finish preprocessing] ---\n")
         return result
 
     def fit(self, model, criterion, optimizer, epochs=1):
@@ -318,8 +333,9 @@ class Model:
     def load(self, name):
         self.model.load_state_dict(torch.load(name))
 
-    def first(self):
-        return next(iter(self.train_loader))[0][0].cpu()
+    def head(self):
+        loader = next(iter(self.train_loader))
+        return loader[0][:5].cpu(), loader[1][:5].cpu()
     def gc(self):
         torch.cuda.empty_cache()
 def stratified_sampling(dataset: Dataset, train_samples_per_class: int):
@@ -453,9 +469,17 @@ def visualize_attentions(maps):
     fig.show()
 def flatten_list(x):
     return [*itertools.chain.from_iterable(x)]
-def plot_images(images, img_width=None,flatten=False):
-    if not isinstance(images, list):
+
+
+def plot_images(images, img_width=None, flatten=False):
+    if not isinstance(images, abc.Sequence):
         images = [images]
+    elif isinstance(images, tuple):
+        images = list(images)
     if flatten:
         images = flatten_list(images)
-    ipyplot.plot_images(images, img_width=img_width if img_width else max(*images[0].shape))
+    for i in range(len(images)):
+        if isinstance(images[i], torch.Tensor):
+            images[i] = np.array(transforms.ToPILImage()(images[i]))
+    ipyplot.plot_images(
+        images, img_width=img_width if img_width else max(*images[0].shape))

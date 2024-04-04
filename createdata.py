@@ -194,7 +194,7 @@ class MessyDataset(Datasetbehaviour):
         def add_line(img, start_point: np.array, end_point: np.array):
             # Define color and thickness of the line
             color = (0, 0, 0, 255)
-            thickness = 2
+            thickness = 1
             cv2.line(img, start_point.astype(int),
                      end_point.astype(int), color, thickness, lineType=cv.LINE_AA)
 
@@ -271,7 +271,7 @@ class MessyDataset(Datasetbehaviour):
                     image, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
 
                 return squared_image
-            h, w = np.array(image.shape[:2]) * 1.41
+            h, w = np.array(image.shape[:2])
             image = reshape_to_square(image, max(h, w))
             if scale <= 100:
                 scaled_width = np.int32(
@@ -279,7 +279,8 @@ class MessyDataset(Datasetbehaviour):
                 image = cv.resize(image, scaled_width)
             else:
                 image = cv.resize(image, (scale, scale))
-            return rotate(image, angle, resize=False) * 255
+            image =  rotate(image, angle, resize=True) * 255
+            return image
 
         def add_image(canvas, image, start):
             h, w = image.shape[:2]
@@ -307,8 +308,7 @@ class MessyDataset(Datasetbehaviour):
             start, end = create_endpoints()
             add_box(img, start, end)
 
-        for _ in range(rng.integers(2)):
-            add_random_image(img, self.postive,[0.5,1])
+        add_random_image(img, self.postive,[0.5,1])
 
         img2 = np.copy(img)
         for _ in range(5):
@@ -318,11 +318,10 @@ class MessyDataset(Datasetbehaviour):
             start, end = create_endpoints()
             add_dottedline(img, start, end)
         for _ in range(5):
-            add_random_image(img, self.negative,[1,2])
+            add_random_image(img, self.negative,[0.8,1.2])
         img = cv.cvtColor(img, cv.COLOR_RGBA2RGB)
         img2 = cv.cvtColor(img2, cv.COLOR_RGBA2RGB)
         return img, img2
 if __name__ == "__main__":
-    Datasetbehaviour.MP = True
-    d = MessyDataset(20000)
+    d = MessyDataset(10)
     plot_images(flatten_list([[d[i][0], d[i][1]] for i in range(10)]), 300)
