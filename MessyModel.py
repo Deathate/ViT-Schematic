@@ -1,98 +1,155 @@
 # %%
+from createdata import MessyDataset, TestDataset
 from Model import *
-from createdata import MessyDataset
 
 width = 200
-Datasetbehaviour.MP = True
-d = MessyDataset(1000)
-plot_images(d.head() , flatten=True, img_width=150)
+d = MessyDataset(20000)
+d.MP = True
+plot_images(d.head(1), 300)
 # %%
-transform = transforms.Compose([
-    transforms.ToImage(),
-    transforms.Resize((width, width)),
-    transforms.Grayscale(),
-    transforms.ToDtype(torch.float32, scale=True),
-])
-model = Model("autoencoder",
-              data=d, transform=transform, ytransform=transform, batch_size=512)
+transform = transforms.Compose(
+    [
+        transforms.ToImage(),
+        transforms.Resize((width, width)),
+        transforms.Grayscale(),
+        transforms.ToDtype(torch.float32, scale=True),
+    ]
+)
+model = Model("autoencoder", data=d, transform=transform, ytransform=transform, batch_size=512)
 # plot_images(model.head())
-#%%
-plot_images(model.head(), flatten=True, img_width=150)
 # %%
+plot_images(model.head(), 200)
+# %%
+
+
 class Autoencoder(nn.Module):
     def __init__(self):
         super(Autoencoder, self).__init__()
         self.encoder = nn.Sequential(
-            # 200x200x1 -> 100x100x16
+            # 200x200x1 ->
+            # 100x100x16
             nn.Conv2d(1, 16, 3, stride=2, padding=1),
             nn.ReLU(),
-            # 100x100x16 -> 50x50x32
+            # 50x50x16
             nn.Conv2d(16, 32, 3, stride=2, padding=1),
             nn.ReLU(),
-            nn.Conv2d(32, 64, 3, stride=2, padding=1),  # 50x50x32 -> 25x25x64
+            # 25x25x32
+            nn.Conv2d(32, 64, 3, stride=2, padding=1),
             nn.ReLU(),
-            # 25x25x64 -> 13x13x128
-            nn.Conv2d(64, 128, 3, stride=2, padding=2),
+            # 13x13x64
+            nn.Conv2d(64, 128, 3, stride=2, padding=1),
             nn.ReLU(),
         )
         self.decoder = nn.Sequential(
-            # 13x13x128 -> 25x25x64
-            nn.ConvTranspose2d(128, 64, 3, stride=2, padding=2),
+            # 25x25x32
+            nn.ConvTranspose2d(128, 64, 3, stride=2, padding=1),
             nn.ReLU(),
-            nn.ConvTranspose2d(64, 32, 3, stride=2, padding=1,
-                               output_padding=1),  # 25x25x64 -> 50x50x32
+            # 50x50x16
+            nn.ConvTranspose2d(64, 32, 3, stride=2, padding=1, output_padding=1),
             nn.ReLU(),
-            nn.ConvTranspose2d(32, 16, 3, stride=2, padding=1,
-                               output_padding=1),  # 50x50x32 -> 100x100x16
+            # 100x100x16
+            nn.ConvTranspose2d(32, 16, 3, stride=2, padding=1, output_padding=1),
             nn.ReLU(),
-            nn.ConvTranspose2d(16, 1, 3, stride=2, padding=1,
-                               output_padding=1),  # 100x100x16 -> 200x200x1
-            nn.Sigmoid()
+            # 200x200x1
+            nn.ConvTranspose2d(16, 1, 3, stride=2, padding=1, output_padding=1),
+            nn.Sigmoid(),
         )
 
-    def forward(self, x):
+    def forward(self, x, y):
         x = self.encoder(x)
         x = self.decoder(x)
         return x
 
 
-m = Autoencoder()
+class TransformerAutoencoder(nn.Module):
+    def __init__(self, image_size, patch_size, dim, heads, mlp_dim, dropout=0, channels=3):
+        super().__init__()
+        image_height, image_width = image_size, image_size
+        patch_height, patch_width = patch_size, patch_size
+
+        assert (
+            image_height % patch_height == 0 and image_width % patch_width == 0
+        ), "Image dimensions must be divisible by the patch size."
+        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
+
+        patch_dim = channels * patch_height * patch_width
+
+        self.to_patch_embedding = nn.Sequential(
+            Rearrange("b c (h p1) (w p2) -> b (h w) (p1 p2 c)", p1=patch_height, p2=patch_width),
+            nn.LayerNorm(patch_dim),
+            nn.Linear(patch_dim, dim),
+            nn.LayerNorm(dim),
+        )
+        self.to_patch_debedding = nn.Sequential(
+            nn.Linear(dim, patch_dim),
+            nn.Sigmoid(),
+            Rearrange(
+                "b (h w) (p1 p2 c) -> b c (h p1) (w p2)",
+                p1=patch_height,
+                p2=patch_width,
+                h=image_height // patch_height,
+                w=image_width // patch_width,
+            ),
+        )
+
+        self.pos_embedding = PositionalEncoding(dim)
+
+        self.encoder = nn.TransformerEncoderLayer(
+            dim, heads, mlp_dim, batch_first=True, dropout=dropout
+        )
+        self.decoder = nn.TransformerDecoderLayer(
+            d_model=dim, nhead=1, dim_feedforward=16, batch_first=True, dropout=dropout
+        )
+
+    def forward(self, data, target):
+        x = self.to_patch_embedding(data)
+        target = self.to_patch_embedding(target)
+        # cls_tokens = einops.repeat(self.cls_token, '1 1 d -> b 1 d', b=img.shape[0])
+        x = self.encoder(x)
+        x = self.decoder(x, target)
+
+        x = self.to_patch_debedding(x)
+        return x
+
+
+# m = Autoencoder()
+m = TransformerAutoencoder(
+    width, patch_size=10, dim=32, heads=1, mlp_dim=32, dropout=0.1, channels=1
+)
 model.gc()
-model.fit(m, nn.MSELoss(), optim.Adam(
-    m.parameters(), lr=1e-4), epochs=5000)
+# model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-3), epochs=10)
+model.fit(m, nn.MSELoss(), optim.SGD(m.parameters(), lr=1e-2), epochs=20)
+# model.fit(m, nn.MSELoss(), optim.SGD(m.parameters(), lr=1e-3), epochs=100)
+# model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-4), epochs=100)
+# model.fit(m, nn.MSELoss(), optim.SGD(m.parameters(), lr=1e-4), epochs=2000)
 # %%
 d2 = MessyDataset(10)
 result = model.inference(d2)
 
 imgs = []
 for i in range(len(result)):
-    imgs.append([np.array(transforms.ToPILImage()(result[0][i])), np.array(
-        transforms.ToPILImage()(result[1][i])), np.array(transforms.ToPILImage()(result[2][i]))])
+    imgs.append(
+        [
+            np.array(transforms.ToPILImage()(result[0][i])),
+            np.array(transforms.ToPILImage()(result[1][i])),
+            np.array(transforms.ToPILImage()(result[2][i])),
+        ]
+    )
 imgs = list(zip(*imgs))
-ipyplot.plot_images(imgs[0])
-ipyplot.plot_images(imgs[1])
+plot_images(imgs, 300)
 # %%
-
-
-class TestDataset(Datasetbehaviour):
-    def __init__(self, size):
-        self.i = 0
-        self.library = ["data_cleaning_example/dac082s085-page29_SOIC_Section_0.png",
-                        "data_cleaning_example/dac082s085-page29_SOIC_Short_0.png", "data_cleaning_example/dac082s085-page29_SOIC_Top_0.png"]
-        super().__init__(size, self.__create)
-
-    def __create(self):
-        res = cv.imread(self.library[self.i]), cv.imread(self.library[self.i])
-        self.i += 1
-        return res
-
 
 d3 = TestDataset(3)
 result = model.inference(d3)
 imgs = []
 for i in range(len(result)):
-    imgs.append([np.array(transforms.ToPILImage()(result[0][i])), np.array(
-        transforms.ToPILImage()(result[1][i])), np.array(transforms.ToPILImage()(result[2][i]))])
+    imgs.append(
+        [
+            np.array(transforms.ToPILImage()(result[0][i])),
+            np.array(transforms.ToPILImage()(result[1][i])),
+            np.array(transforms.ToPILImage()(result[2][i])),
+        ]
+    )
 imgs = list(zip(*imgs))
 ipyplot.plot_images(imgs[0], img_width=200)
 ipyplot.plot_images(imgs[1], img_width=200)
