@@ -117,11 +117,11 @@ m = TransformerAutoencoder(
     width, patch_size=10, dim=32, heads=1, mlp_dim=32, dropout=0.1, channels=1
 )
 model.gc()
-# model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-3), epochs=10)
+# model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-3), epochs=20)
+# model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-4), epochs=20)
 model.fit(m, nn.MSELoss(), optim.SGD(m.parameters(), lr=1e-2), epochs=20)
-# model.fit(m, nn.MSELoss(), optim.SGD(m.parameters(), lr=1e-3), epochs=100)
-# model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-4), epochs=100)
-# model.fit(m, nn.MSELoss(), optim.SGD(m.parameters(), lr=1e-4), epochs=2000)
+model.fit(m, nn.MSELoss(), optim.SGD(m.parameters(), lr=1e-3), epochs=100)
+model.fit(m, nn.MSELoss(), optim.SGD(m.parameters(), lr=1e-4), epochs=2000)
 # %%
 d2 = MessyDataset(10)
 result = model.inference(d2)
@@ -152,4 +152,4 @@ for i in range(len(result)):
     )
 imgs = list(zip(*imgs))
 ipyplot.plot_images(imgs[0], img_width=200)
-ipyplot.plot_images(imgs[1], img_width=200)
+# ipyplot.plot_images(imgs[1], img_width=200)

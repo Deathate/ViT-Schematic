@@ -359,8 +359,19 @@ class TestDataset(Datasetbehaviour):
         return res
 
 
+class AEDataset(Datasetbehaviour):
+    def __init__(self, size):
+        super().__init__(size, self.__create)
+
+    def __create(self):
+        x = np.random.rand(512, 512, 3) * 255
+        return x, x
+
+
 if __name__ == "__main__":
-    d = MessyDataset(10)
-    plot_images(d.head(), 150)
-    d = TestDataset(3)
-    plot_images(d.head(), 150)
+    # plot_images(MessyDataset(10).head(), 150)
+    # plot_images(TestDataset(3).head()[0], 300)
+    # plot_images(TestDataset(3).head()[1], 300)
+    # plot_images(TestDataset(3).head()[2], 300)
+    # plot_images(TestDataset(3).head(), 150)
+    plot_images(AEDataset(3).head(), 150)

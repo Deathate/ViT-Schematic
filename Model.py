@@ -99,13 +99,10 @@ class Datasetbehaviour:
         file = Path(class_name + "_" + id + ".pkl")
         return parent / file
 
-    def head(self, size=5):
+    def head(self, size=3):
         dataset = []
-        try:
-            for _ in range(size):
-                dataset.append(self.creater(*self.args))
-        except:
-            pass
+        for _ in range(min(size, self.size)):
+            dataset.append(self.creater(*self.args))
         return dataset
 
     def __load(self):
@@ -252,7 +249,7 @@ class Model:
         print("--- [finish preprocessing] ---\n")
         return result
 
-    def fit(self, model, criterion, optimizer, epochs=1, compile=False, early_stopping=True):
+    def fit(self, model, criterion, optimizer, epochs=1, compile=False, amp=True):
         self.model = model.to(device="cuda", non_blocking=True)
         torch.backends.cudnn.benchmark = True
         self.model_overview(self.model)
@@ -265,7 +262,8 @@ class Model:
         end = self.ep + epochs
 
         early_stopping_monitor = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=15)
-        # scaler = torch.cuda.amp.GradScaler()
+        if amp:
+            scaler = torch.cuda.amp.GradScaler()
         for ep in range(start, end):
             self.model.train()
             with tqdm(
@@ -277,13 +275,15 @@ class Model:
                 train_loss = []
                 pbar.set_postfix({"loss": "---", "acc": "---"})
                 for data, target in self.train_loader:
-                    with torch.cuda.amp.autocast():
+                    def train():
                         y_hat = self.model(data, target)
                         try:
                             loss = self.loss(y_hat, target, criterion, eval=False)
                             optimizer.zero_grad()
-                            # scaler.scale(loss).backward()
-                            loss.backward()
+                            if amp:
+                                scaler.scale(loss).backward()
+                            else:
+                                loss.backward()
                             torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1)
                             optimizer.step()
                             train_loss.append(loss)
@@ -301,6 +301,11 @@ class Model:
                             print(error)
                             print(e)
                             exit()
+                    if amp:
+                        with torch.cuda.amp.autocast():
+                            train()
+                    else:
+                        train()
 
                 train_loss = torch.stack(train_loss).mean()
                 self.writer.add_scalar("loss/train", train_loss, ep + 1)
@@ -314,11 +319,10 @@ class Model:
                 val_loss = torch.stack(val_loss).mean()
                 self.writer.add_scalar("loss/validation", val_loss, ep + 1)
                 pbar.set_postfix({"loss": f"{train_loss:.3E}", "acc": f"{val_loss:.3E}"})
-                if early_stopping:
-                    early_stopping_monitor.step(train_loss)
-                    if early_stopping_monitor.num_bad_epochs >= early_stopping_monitor.patience:
-                        print("Early Stopping")
-                        break
+                early_stopping_monitor.step(train_loss)
+                if early_stopping_monitor.num_bad_epochs >= early_stopping_monitor.patience:
+                    print("Early Stopping")
+                    break
         self.ep = ep + 1
         end_time = time.time()
         print(f"Elapsed time: {end_time - start_time:.3f} seconds")
@@ -386,7 +390,7 @@ class Model:
     def load(self, name):
         self.model.load_state_dict(torch.load(name))
 
-    def head(self, size=5):
+    def head(self, size=3):
         loader = next(iter(self.train_loader))
         return [loader[0][i].cpu() for i in range(size)], [loader[1][i].cpu() for i in range(size)]
 
@@ -562,6 +566,6 @@ def plot_images(images, img_width=None):
     cols = len(images) // L
     for i in range(0, len(images), cols):
         ipyplot.plot_images(
-            images[i : i + cols],
-            img_width=img_width if img_width else max(*images[0].shape),
+            images[i: i + cols],
+            img_width=img_width if img_width else 200,
         )
