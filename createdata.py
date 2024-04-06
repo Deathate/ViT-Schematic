@@ -340,6 +340,8 @@ class MessyDataset(Datasetbehaviour):
             add_random_image(img, self.negative, [0.8, 1.2])
         img = cv.cvtColor(img, cv.COLOR_RGBA2RGB)
         img2 = cv.cvtColor(img2, cv.COLOR_RGBA2RGB)
+        img = cv.threshold(img, 127, 1, cv.THRESH_BINARY_INV)[1]
+        img2 = cv.threshold(img2, 127, 1, cv.THRESH_BINARY_INV)[1]
         return img, img2
 
 
@@ -354,24 +356,12 @@ class TestDataset(Datasetbehaviour):
         super().__init__(size, self.__create)
 
     def __create(self):
-        res = cv.imread(self.library[self.i]), cv.imread(self.library[self.i])
+        img = cv.imread(self.library[self.i])
+        res = img, img
         self.i += 1
         return res
 
 
-class AEDataset(Datasetbehaviour):
-    def __init__(self, size):
-        super().__init__(size, self.__create)
-
-    def __create(self):
-        x = np.random.rand(512, 512, 3) * 255
-        return x, x
-
-
 if __name__ == "__main__":
-    # plot_images(MessyDataset(10).head(), 150)
-    # plot_images(TestDataset(3).head()[0], 300)
-    # plot_images(TestDataset(3).head()[1], 300)
-    # plot_images(TestDataset(3).head()[2], 300)
-    # plot_images(TestDataset(3).head(), 150)
-    plot_images(AEDataset(3).head(), 150)
+    plot_images(MessyDataset(10), 150)
+    # plot_images(TestDataset(3), 150)

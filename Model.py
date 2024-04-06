@@ -9,6 +9,7 @@ import os
 import pickle
 import random
 import secrets
+import shutil
 import textwrap
 import time
 from functools import partial
@@ -99,12 +100,6 @@ class Datasetbehaviour:
         file = Path(class_name + "_" + id + ".pkl")
         return parent / file
 
-    def head(self, size=3):
-        dataset = []
-        for _ in range(min(size, self.size)):
-            dataset.append(self.creater(*self.args))
-        return dataset
-
     def __load(self):
         print("[dataset creation]")
         if Path(self.filepath).exists() and not self.RESET:
@@ -130,7 +125,10 @@ class Datasetbehaviour:
     def __getitem__(self, idx):
         if self.dataset is None:
             self.__load()
-        return self.dataset[0][idx], self.dataset[1][idx]
+        if isinstance(idx, slice):
+            return list(zip(self.dataset[0][idx], self.dataset[1][idx]))
+        else:
+            return self.dataset[0][idx], self.dataset[1][idx]
 
     def __len__(self):
         if self.dataset is None:
@@ -182,7 +180,6 @@ class Model:
             self.ytransform = lambda x: torch.tensor(x).float()
         select_gpu_with_most_free_memory()
         # torch.set_default_device('cuda')
-
         dataset = self.preprocessing(data)
         generator = torch.Generator(device="cpu")
         train_dataset, test_dataset = torch.utils.data.random_split(
@@ -212,13 +209,15 @@ class Model:
         self.writer = SummaryWriter(comment=self.name)
         layout = {
             "metrics": {
-                "loss": ["Multiline", ["loss/train"]],
-                "accuracy": ["Multiline", ["loss/validation"]],
+                "loss": ["Multiline", ["Loss/train"]],
+                "accuracy": ["Multiline", ["Loss/validation"]],
             },
         }
         self.writer.add_custom_scalars(layout)
         self.ep = 0
         self.eval_metrics = eval_metrics
+        self.model = None
+        self.model_id = None
         torch.cuda.empty_cache()
 
     def preprocessing(self, data: Datasetbehaviour):
@@ -232,6 +231,7 @@ class Model:
             transform_id += inspect.getsource(self.ytransform)
         except:
             transform_id += str(self.transform)
+
         filepath = (
             Path(data.filepath).parent
             / "cache"
@@ -250,84 +250,104 @@ class Model:
         return result
 
     def fit(self, model, criterion, optimizer, epochs=1, compile=False, amp=True):
-        self.model = model.to(device="cuda", non_blocking=True)
-        torch.backends.cudnn.benchmark = True
-        self.model_overview(self.model)
-        # accelerate trining speed
-        if compile:
-            self.model = torch.compile(self.model, mode="reduce-overhead")
-        start_time = time.time()
-        # torch.set_float32_matmul_precision("high")
-        start = self.ep
-        end = self.ep + epochs
+        if id(model) != self.model_id:
+            self.model_id = id(model)
+            self.gc()
+        try:
+            self.model = model.to(device="cuda", non_blocking=True)
+            torch.backends.cudnn.benchmark = True
+            self.model_overview(self.model)
+            print("----------- Training started -----------")
+            # accelerate trining speed
+            if compile:
+                self.model = torch.compile(self.model, mode="reduce-overhead")
+            start_time = time.time()
+            # torch.set_float32_matmul_precision("high")
+            start = self.ep
+            end = self.ep + epochs
 
-        early_stopping_monitor = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=15)
-        if amp:
-            scaler = torch.cuda.amp.GradScaler()
-        for ep in range(start, end):
-            self.model.train()
-            with tqdm(
-                total=len(self.train_loader),
-                bar_format="{desc}{n_fmt}/{total_fmt}|{bar}| - {elapsed}s{postfix}",
-            ) as pbar:
-                # torch.cuda.amp.autocast()
-                pbar.set_description(f"Epoch {ep+1}/{end}")
-                train_loss = []
-                pbar.set_postfix({"loss": "---", "acc": "---"})
-                for data, target in self.train_loader:
-                    def train():
-                        y_hat = self.model(data, target)
-                        try:
-                            loss = self.loss(y_hat, target, criterion, eval=False)
-                            optimizer.zero_grad()
-                            if amp:
-                                scaler.scale(loss).backward()
-                            else:
-                                loss.backward()
-                            torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1)
-                            optimizer.step()
-                            train_loss.append(loss)
-                            pbar.update(1)
-                        except Exception as e:
-                            # print("Error in loss calculation", e)
-                            error = tabulate(
-                                [
-                                    ["y_hat", y_hat.dtype, list(y_hat.shape)],
-                                    ["target", target.dtype, list(target.shape)],
-                                ],
-                                headers=["", "dtype", "shape"],
-                                tablefmt="psql",
-                            )
-                            print(error)
-                            print(e)
-                            exit()
-                    if amp:
-                        with torch.cuda.amp.autocast():
+            early_stopping_monitor = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=15)
+            if amp:
+                scaler = torch.cuda.amp.GradScaler()
+            for ep in range(start, end):
+                self.model.train()
+                with tqdm(
+                    total=len(self.train_loader),
+                    bar_format="{desc}{n_fmt}/{total_fmt}|{bar}| - {elapsed}s{postfix}",
+                ) as pbar:
+                    # torch.cuda.amp.autocast()
+                    pbar.set_description(f"Epoch {ep+1}/{end}")
+                    train_loss = []
+                    pbar.set_postfix({"loss": "---", "acc": "---"})
+                    for data, target in self.train_loader:
+                        def train():
+                            y_hat = self.model(data, target)
+                            if ep == start:
+                                from torchviz import make_dot
+                                graph = make_dot(y_hat, params=dict(model.named_parameters()))
+                                graph.render(Path(self.writer.log_dir) /
+                                             "model_graph", format="png")
+                                # png_graph = graph.pipe(format='png')
+                                # png_graph = Image.open(io.BytesIO(png_graph))
+                                # png_graph = np.array(png_graph)
+                                # self.writer.add_image("Model Graph", png_graph, dataformats='HWC')
+                            try:
+                                loss = self.loss(y_hat, target, criterion, eval=False)
+                                optimizer.zero_grad()
+                                if amp:
+                                    scaler.scale(loss).backward()
+                                else:
+                                    loss.backward()
+                                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1)
+                                optimizer.step()
+                                train_loss.append(loss)
+                                pbar.update(1)
+                            except Exception as e:
+                                # print("Error in loss calculation", e)
+                                error = tabulate(
+                                    [
+                                        ["y_hat", y_hat.dtype, list(y_hat.shape)],
+                                        ["target", target.dtype, list(target.shape)],
+                                    ],
+                                    headers=["", "dtype", "shape"],
+                                    tablefmt="psql",
+                                )
+                                print(error)
+                                print(e)
+                                exit()
+                        if amp:
+                            with torch.cuda.amp.autocast():
+                                train()
+                        else:
                             train()
-                    else:
-                        train()
 
-                train_loss = torch.stack(train_loss).mean()
-                self.writer.add_scalar("loss/train", train_loss, ep + 1)
+                    train_loss = torch.stack(train_loss).mean()
+                    self.writer.add_scalar("Loss/train", train_loss, ep + 1)
+                    # calculate validation loss
+                    self.model.eval()
+                    val_loss = []
+                    for data, target in self.test_loader:
+                        y_hat = self.predict(data, target)
+                        val_loss.append(self.loss(y_hat, target, criterion, eval=True))
+                    val_loss = torch.stack(val_loss).mean()
+                    self.writer.add_scalar("Loss/validation", val_loss, ep + 1)
+                    self.writer.add_scalars('Loss', {'validation': val_loss,
+                                                     'train': train_loss}, ep + 1)
+                    pbar.set_postfix({"loss": f"{train_loss:.3E}", "acc": f"{val_loss:.3E}"})
+                    early_stopping_monitor.step(train_loss)
+                    if early_stopping_monitor.num_bad_epochs >= early_stopping_monitor.patience:
+                        print("Early Stopping")
+                        break
+            self.ep = ep + 1
+        except KeyboardInterrupt:
+            print("Keyboard interrupt received.")
 
-                # calculate validation loss
-                self.model.eval()
-                val_loss = []
-                for data, target in self.test_loader:
-                    y_hat = self.predict(data, target)
-                    val_loss.append(self.loss(y_hat, target, criterion, eval=True))
-                val_loss = torch.stack(val_loss).mean()
-                self.writer.add_scalar("loss/validation", val_loss, ep + 1)
-                pbar.set_postfix({"loss": f"{train_loss:.3E}", "acc": f"{val_loss:.3E}"})
-                early_stopping_monitor.step(train_loss)
-                if early_stopping_monitor.num_bad_epochs >= early_stopping_monitor.patience:
-                    print("Early Stopping")
-                    break
-        self.ep = ep + 1
         end_time = time.time()
         print(f"Elapsed time: {end_time - start_time:.3f} seconds")
         print("----------- Training finished -----------")
         print()
+        torch.save(model.state_dict(), Path(self.writer.log_dir) / "checkpoint.pth")
+        shutil.copy(inspect.getfile(self.model.__class__), Path(self.writer.log_dir))
 
     @torch.no_grad()
     def predict(self, data: torch.tensor, target: torch.tensor):
@@ -390,11 +410,17 @@ class Model:
     def load(self, name):
         self.model.load_state_dict(torch.load(name))
 
-    def head(self, size=3):
+    def __getitem__(self, size):
         loader = next(iter(self.train_loader))
-        return [loader[0][i].cpu() for i in range(size)], [loader[1][i].cpu() for i in range(size)]
+        ret = list(zip(loader[0][size].cpu(), loader[1][size].cpu()))
+        if isinstance(size, slice):
+            return ret
+        else:
+            return ret[0]
 
     def gc(self):
+        if self.model:
+            torch.nn.init.xavier_uniform(self.model.weight.data)
         import gc
 
         collected = gc.collect()
@@ -555,11 +581,15 @@ def flatten_list(lst):
     return flattened_list
 
 
-def plot_images(images, img_width=None):
-    if not isinstance(images, abc.Sequence):
+def plot_images(images, img_width=None, max_images=5):
+    if not isinstance(images, abc.Sequence) and not isinstance(images, Datasetbehaviour) and not isinstance(images, Model):
         images = [images]
+    images = images[:max_images]
     L = len(images)
     images = flatten_list(images)
+    for i in range(len(images)):
+        if images[i].max() <= 1:
+            images[i] = images[i] * 255
     for i in range(len(images)):
         if isinstance(images[i], torch.Tensor):
             images[i] = np.array(transforms.ToPILImage()(images[i]))

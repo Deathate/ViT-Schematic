@@ -5,7 +5,7 @@ from Model import *
 width = 200
 d = MessyDataset(20000)
 d.MP = True
-plot_images(d.head(1), 300)
+# plot_images(d, 200, max_images=2)
 # %%
 transform = transforms.Compose(
     [
@@ -16,9 +16,7 @@ transform = transforms.Compose(
     ]
 )
 model = Model("autoencoder", data=d, transform=transform, ytransform=transform, batch_size=512)
-# plot_images(model.head())
-# %%
-plot_images(model.head(), 200)
+plot_images(model, 200, max_images=2)
 # %%
 
 
@@ -98,7 +96,10 @@ class TransformerAutoencoder(nn.Module):
             dim, heads, mlp_dim, batch_first=True, dropout=dropout
         )
         self.decoder = nn.TransformerDecoderLayer(
-            d_model=dim, nhead=1, dim_feedforward=16, batch_first=True, dropout=dropout
+            dim, heads, mlp_dim, batch_first=True, dropout=dropout
+        )
+        self.mlp = nn.Sequential(
+            nn.Linear(dim, 2),
         )
 
     def forward(self, data, target):
@@ -107,8 +108,7 @@ class TransformerAutoencoder(nn.Module):
         # cls_tokens = einops.repeat(self.cls_token, '1 1 d -> b 1 d', b=img.shape[0])
         x = self.encoder(x)
         x = self.decoder(x, target)
-
-        x = self.to_patch_debedding(x)
+        x = self.mlp(x)
         return x
 
 
@@ -116,12 +116,10 @@ class TransformerAutoencoder(nn.Module):
 m = TransformerAutoencoder(
     width, patch_size=10, dim=32, heads=1, mlp_dim=32, dropout=0.1, channels=1
 )
-model.gc()
-# model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-3), epochs=20)
-# model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-4), epochs=20)
-model.fit(m, nn.MSELoss(), optim.SGD(m.parameters(), lr=1e-2), epochs=20)
-model.fit(m, nn.MSELoss(), optim.SGD(m.parameters(), lr=1e-3), epochs=100)
-model.fit(m, nn.MSELoss(), optim.SGD(m.parameters(), lr=1e-4), epochs=2000)
+
+model.fit(m, nn.MSELoss(), optim.SGD(m.parameters(), lr=1e-2), epochs=2000)
+model.fit(m, nn.MSELoss(), optim.SGD(m.parameters(), lr=1e-3), epochs=2000)
+
 # %%
 d2 = MessyDataset(10)
 result = model.inference(d2)
@@ -152,4 +150,5 @@ for i in range(len(result)):
     )
 imgs = list(zip(*imgs))
 ipyplot.plot_images(imgs[0], img_width=200)
+ipyplot.plot_images(imgs[1], img_width=200)
 # ipyplot.plot_images(imgs[1], img_width=200)
