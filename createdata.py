@@ -186,11 +186,11 @@ class MessyDataset(Datasetbehaviour):
     def __init__(self, size):
         self.postive = [
             cv.imread(str(x), cv.IMREAD_UNCHANGED)
-            for x in list(Path("data_cleaning_example/positive").glob("*/*"))
+            for x in list(Path("data_cleaning_example/positive").glob("*/*.png"))
         ]
         self.negative = [
             cv.imread(str(x), cv.IMREAD_UNCHANGED)
-            for x in list(Path("data_cleaning_example/negative").glob("*/*"))
+            for x in list(Path("data_cleaning_example/negative").glob("*/*png"))
         ]
         super().__init__(size, self.__create)
 
@@ -307,14 +307,13 @@ class MessyDataset(Datasetbehaviour):
                     if image[i - start[0], j - start[1], 3] > 0:
                         canvas[i, j] = image[i - start[0], j - start[1]]
 
-        def add_random_image(canvas, candicates, scale_range):
-            angle = rng.integers(360)
+        def add_random_image(canvas, candicates, scale_range=[0.99, 1]):
+            angle = random.choice([0, 90, 180, 270])
             cand = random.choice(candicates)
             scale = rng.uniform(*scale_range)
             image = affine_image(cand, angle, min(scale, 480 / cand.shape[0]))
             start = rng.integers(512 - max(*image.shape), size=2)
             add_image(canvas, image, start)
-
         rng = np.random.default_rng()
         img = np.full((512, 512, 4), 255, np.uint8)
 
@@ -326,23 +325,41 @@ class MessyDataset(Datasetbehaviour):
         # for _ in range(rng.integers(5)):
         #     start, end = create_endpoints()
         #     add_box(img, start, end)
-
-        add_random_image(img, self.postive, [0.5, 1])
+        for _ in range(2):
+            add_random_image(img, self.postive, [0.8, 1.2])
 
         img2 = np.copy(img)
-        for _ in range(5):
+        for _ in range(2):
             start, end = create_endpoints()
             add_line(img, start, end)
         for _ in range(2):
             start, end = create_endpoints()
             add_dottedline(img, start, end)
-        for _ in range(5):
+        for _ in range(20):
             add_random_image(img, self.negative, [0.8, 1.2])
         img = cv.cvtColor(img, cv.COLOR_RGBA2RGB)
         img2 = cv.cvtColor(img2, cv.COLOR_RGBA2RGB)
-        img = cv.threshold(img, 127, 1, cv.THRESH_BINARY_INV)[1]
-        img2 = cv.threshold(img2, 127, 1, cv.THRESH_BINARY_INV)[1]
         return img, img2
+
+
+class GroundTruthDataset(Datasetbehaviour):
+    def __init__(self, size):
+        self.i = 0
+        self.ground = [
+            cv.imread(str(x), cv.IMREAD_UNCHANGED)
+            for x in list(x for x in Path("data_cleaning_example/ground_truth").glob('*jpg') if 'c' not in x.name)
+        ]
+        self.truth = [
+            cv.imread(str(x), cv.IMREAD_UNCHANGED)
+            for x in list(Path("data_cleaning_example/ground_truth").glob('*c*'))
+        ]
+        size = len(self.ground)
+        super().__init__(size, self.__create)
+
+    def __create(self):
+        res = self.ground[self.i], self.truth[self.i]
+        self.i += 1
+        return res
 
 
 class TestDataset(Datasetbehaviour):
@@ -353,6 +370,7 @@ class TestDataset(Datasetbehaviour):
             "data_cleaning_example/dac082s085-page29_SOIC_Short_0.png",
             "data_cleaning_example/dac082s085-page29_SOIC_Top_0.png",
         ]
+        size = len(self.library)
         super().__init__(size, self.__create)
 
     def __create(self):
@@ -363,5 +381,6 @@ class TestDataset(Datasetbehaviour):
 
 
 if __name__ == "__main__":
-    plot_images(MessyDataset(10), 150)
+    plot_images(MessyDataset(10), 200)
+    plot_images(GroundTruthDataset(10), 200)
     # plot_images(TestDataset(3), 150)

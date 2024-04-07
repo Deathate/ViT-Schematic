@@ -1140,24 +1140,6 @@
       "label": "net",
       "points": [
         [
-          183.13157894736844,
-          411.5701754385965
-        ],
-        [
-          183.13157894736844,
-          427.79824561403507
-        ]
-      ],
-      "group_id": null,
-      "description": null,
-      "shape_type": "polygon",
-      "flags": {},
-      "mask": null
-    },
-    {
-      "label": "net",
-      "points": [
-        [
           299.359649122807,
           433.5
         ],
@@ -1210,6 +1192,24 @@
       ],
       "group_id": null,
       "description": "17, 24; 2, 0",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          182.97975708502022,
+          409.91902834008096
+        ],
+        [
+          183.1821862348178,
+          428.744939271255
+        ]
+      ],
+      "group_id": null,
+      "description": "19, 23; 2, 0",
       "shape_type": "polygon",
       "flags": {},
       "mask": null

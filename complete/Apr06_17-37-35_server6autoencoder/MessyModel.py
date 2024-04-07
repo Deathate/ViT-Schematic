@@ -1,38 +1,22 @@
 # %%
-from createdata import GroundTruthDataset, MessyDataset, TestDataset
+from createdata import MessyDataset, TestDataset
 from Model import *
 
 width = 200
 d = MessyDataset(20000)
 d.MP = True
-d2 = GroundTruthDataset(10)
-plot_images(d2, 200, max_images=2)
-
-d = d.union_dataset(d2)
+# plot_images(d, 200, max_images=2)
 # %%
 transform = transforms.Compose(
     [
         transforms.ToImage(),
-        transforms.Grayscale(),
         transforms.Resize((width, width)),
+        transforms.Grayscale(),
         transforms.ToDtype(torch.float32, scale=True),
     ]
 )
-ytransform = transforms.Compose(
-    [
-        transforms.ToImage(),
-        transforms.Grayscale(),
-        transforms.Resize((width, width)),
-        ThresholdTransform(150),
-        transforms.ToDtype(torch.float32, scale=False),
-    ]
-)
-model = Model("autoencoder", data=d, transform=transform,
-              ytransform=ytransform, batch_size=512, shuffle=True)
+model = Model("autoencoder", data=d, transform=transform, ytransform=transform, batch_size=512)
 plot_images(model, 200, max_images=2)
-# %%
-d3 = TestDataset(3)
-plot_images(d3)
 # %%
 
 
@@ -84,6 +68,7 @@ class TransformerAutoencoder(nn.Module):
         assert (
             image_height % patch_height == 0 and image_width % patch_width == 0
         ), "Image dimensions must be divisible by the patch size."
+        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
 
         patch_dim = channels * patch_height * patch_width
 
@@ -96,7 +81,6 @@ class TransformerAutoencoder(nn.Module):
         self.to_patch_debedding = nn.Sequential(
             nn.Linear(dim, patch_dim),
             nn.Sigmoid(),
-            # nn.ReLU(),
             Rearrange(
                 "b (h w) (p1 p2 c) -> b c (h p1) (w p2)",
                 p1=patch_height,
@@ -112,18 +96,15 @@ class TransformerAutoencoder(nn.Module):
             dim, heads, mlp_dim, batch_first=True, dropout=dropout
         )
         self.decoder = nn.TransformerDecoderLayer(
-            dim, heads, mlp_dim, batch_first=True, dropout=dropout
+            d_model=dim, nhead=1, dim_feedforward=16, batch_first=True, dropout=dropout
         )
-        self.tgt = nn.Parameter(torch.randn(1, patch_dim, dim))
 
-    def forward(self, x, target):
-        x = self.to_patch_embedding(x)
-        # target = self.to_patch_embedding(target)
-        x += self.pos_embedding(x)
+    def forward(self, data, target):
+        x = self.to_patch_embedding(data)
+        target = self.to_patch_embedding(target)
+        # cls_tokens = einops.repeat(self.cls_token, '1 1 d -> b 1 d', b=img.shape[0])
         x = self.encoder(x)
-        # tgt = self.tgt + self.pos_embedding(self.tgt)
-        tgt = repeat(self.tgt, '1 a b -> c a b', c=x.shape[0])
-        x = self.decoder(x, tgt)
+        x = self.decoder(x, target)
 
         x = self.to_patch_debedding(x)
         return x
@@ -131,17 +112,43 @@ class TransformerAutoencoder(nn.Module):
 
 # m = Autoencoder()
 m = TransformerAutoencoder(
-    width, patch_size=10, dim=80, heads=1, mlp_dim=80, dropout=0, channels=1
+    width, patch_size=10, dim=32, heads=1, mlp_dim=32, dropout=0.1, channels=1
 )
-
-model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-2), epochs=1000)
-model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-3), epochs=1000)
-# model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-4), epochs=200)
+model.gc()
+# model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-3), epochs=20)
+# model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-4), epochs=20)
+model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-2), epochs=2000)
+model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-3), epochs=2000)
 # model.fit(m, nn.MSELoss(), optim.SGD(m.parameters(), lr=1e-4), epochs=2000)
 # %%
-result = model.inference(MessyDataset(10))
-plot_images(result, img_width=200, max_images=10)
-result = model.inference(GroundTruthDataset(10))
-plot_images(result, img_width=200, max_images=10)
-result = model.inference(TestDataset(3))
-plot_images(result, img_width=300)
+d2 = MessyDataset(10)
+result = model.inference(d2)
+
+imgs = []
+for i in range(len(result)):
+    imgs.append(
+        [
+            np.array(transforms.ToPILImage()(result[0][i])),
+            np.array(transforms.ToPILImage()(result[1][i])),
+            np.array(transforms.ToPILImage()(result[2][i])),
+        ]
+    )
+imgs = list(zip(*imgs))
+plot_images(imgs, 300)
+# %%
+
+d3 = TestDataset(3)
+result = model.inference(d3)
+imgs = []
+for i in range(len(result)):
+    imgs.append(
+        [
+            np.array(transforms.ToPILImage()(result[0][i])),
+            np.array(transforms.ToPILImage()(result[1][i])),
+            np.array(transforms.ToPILImage()(result[2][i])),
+        ]
+    )
+imgs = list(zip(*imgs))
+ipyplot.plot_images(imgs[0], img_width=200)
+ipyplot.plot_images(imgs[1], img_width=200)
+# ipyplot.plot_images(imgs[1], img_width=200)
