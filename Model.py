@@ -91,7 +91,7 @@ class Datasetbehaviour:
         key = inspect.getsource(type(self)) + str(args) + str(size)
         filepath = self.__get_filepath(key)
         self.filepath = str(filepath)
-        self.dataset = None
+        self.__dataset = None
         self.RESET = False
         self.MP = False
 
@@ -108,40 +108,44 @@ class Datasetbehaviour:
         if Path(self.filepath).exists() and not self.RESET:
             print("    [cache found]:")
             print(textwrap.fill(self.filepath, 70, initial_indent=" " * 4))
-            self.dataset = pickle.load(open(self.filepath, "rb"))
+            self.__dataset = pickle.load(open(self.filepath, "rb"))
         else:
             if not self.MP:
                 dataset = []
                 for _ in tqdm(range(self.size)):
+                    rng = np.random.default_rng()
                     dataset.append(self.creater(*self.args))
             else:
+                def create():
+                    rng = np.random.default_rng()
+                    return self.creater(*self.args)
+
                 dataset = p_tqdm.p_umap(
-                    lambda _: self.creater(*self.args),
+                    create,
                     range(self.size),
                     num_cpus=os.cpu_count() - 4,
                 )
-            self.dataset = list(map(list, zip(*dataset)))
-            pickle.dump(self.dataset, open(self.filepath, "wb"))
+            self.__dataset = list(map(list, zip(*dataset)))
+            pickle.dump(self.__dataset, open(self.filepath, "wb"))
         print("--- [finish creation] ---\n")
         self.loaded = True
 
     def __getitem__(self, idx):
-        if self.dataset is None:
+        if self.__dataset is None:
             self.__load()
         if isinstance(idx, slice):
-            return list(zip(self.dataset[0][idx], self.dataset[1][idx]))
+            return list(zip(self.__dataset[0][idx], self.__dataset[1][idx]))
         else:
-            return self.dataset[0][idx], self.dataset[1][idx]
+            return self.__dataset[0][idx], self.__dataset[1][idx]
 
     def __len__(self):
-        if self.dataset is None:
+        if self.__dataset is None:
             self.__load()
-        return len(self.dataset[0])
+        return len(self.__dataset[0])
 
     def save_params(self):
         frame = inspect.currentframe()
         args, _, _, values = inspect.getargvalues(frame)
-        print(args)
         arg_values = {arg: values[arg] for arg in set(args) - set(["self"])}
         for arg in arg_values:
             setattr(self, arg, arg_values[arg])
@@ -156,10 +160,10 @@ class Datasetbehaviour:
                     dataset[j][i] = torch.tensor(np.asarray(dataset[j][i]))
 
     def union_dataset(self, instance):
-        if self.dataset is None:
+        if self.__dataset is None:
             self.__load()
-        self.dataset[0] += instance.dataset[0]
-        self.dataset[1] += instance.dataset[1]
+        self.__dataset[0] += instance.dataset[0]
+        self.__dataset[1] += instance.dataset[1]
         return self
 
 
@@ -598,6 +602,7 @@ def plot_images(images, img_width=None, max_images=5):
     images = images[:max_images]
     L = len(images)
     images = flatten_list(images)
+
     for i in range(len(images)):
         if isinstance(images[i], torch.Tensor):
             scale = images[i].max() > 1 and images[i].dtype == torch.float32
@@ -614,7 +619,8 @@ def plot_images(images, img_width=None, max_images=5):
     for i in range(0, len(images), cols):
         ipyplot.plot_images(
             images[i: i + cols],
-            img_width=img_width if img_width else 200,
+            img_width=images[i].shape[0] if img_width == -
+            1 else img_width if img_width else 200,
         )
 
 
@@ -627,3 +633,23 @@ class ThresholdTransform(object):
 
     def __repr__(self):
         return f"ThresholdTransform({self.thr})"
+
+
+def reshape_to_square(image, desired_size, color=(255, 255, 255)):
+    old_image_height, old_image_width, channels = image.shape
+    ratio = old_image_height / old_image_width
+    if ratio < 1:
+        old_image_width, old_image_height = int(desired_size * ratio), desired_size
+    else:
+        old_image_width, old_image_height = desired_size, int(desired_size / ratio)
+    image = cv.resize(image, (old_image_height, old_image_width))
+
+    # create new image of desired size and color (blue) for padding
+    result = np.full((desired_size, desired_size, channels), color, dtype=np.uint8)
+    # compute center offset
+    x_center = (desired_size - old_image_width) // 2
+    y_center = (desired_size - old_image_height) // 2
+    # copy img image into center of result image
+    result[x_center:x_center + old_image_width, y_center:y_center + old_image_height] = image
+
+    return result

@@ -3,7 +3,7 @@ from createdata import GroundTruthDataset, MessyDataset, TestDataset
 from Model import *
 
 width = 200
-d = MessyDataset(20000)
+d = MessyDataset(30000)
 d.MP = True
 d2 = GroundTruthDataset(10)
 plot_images(d2, 200, max_images=2)
@@ -131,7 +131,7 @@ class TransformerAutoencoder(nn.Module):
 
 # m = Autoencoder()
 m = TransformerAutoencoder(
-    width, patch_size=10, dim=80, heads=1, mlp_dim=80, dropout=0, channels=1
+    width, patch_size=10, dim=50, heads=1, mlp_dim=80, dropout=0, channels=1
 )
 
 model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-2), epochs=1000)
