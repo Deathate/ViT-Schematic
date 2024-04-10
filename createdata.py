@@ -314,7 +314,7 @@ class MessyDataset(Datasetbehaviour):
             image = affine_image(cand, angle, min(scale, 480 / cand.shape[0]))
             start = rng.integers(512 - max(*image.shape), size=2)
             add_image(canvas, image, start)
-        rng = np.random.default_rng()
+
         img = np.full((512, 512, 4), 255, np.uint8)
 
         # for _ in range(rng.integers(3)):
@@ -325,8 +325,7 @@ class MessyDataset(Datasetbehaviour):
         # for _ in range(rng.integers(5)):
         #     start, end = create_endpoints()
         #     add_box(img, start, end)
-        for _ in range(2):
-            add_random_image(img, self.postive, [0.8, 1.2])
+        add_random_image(img, self.postive, [0.8, 1.2])
 
         img2 = np.copy(img)
         for _ in range(2):
@@ -335,7 +334,7 @@ class MessyDataset(Datasetbehaviour):
         for _ in range(2):
             start, end = create_endpoints()
             add_dottedline(img, start, end)
-        for _ in range(20):
+        for _ in range(10):
             add_random_image(img, self.negative, [0.8, 1.2])
         img = cv.cvtColor(img, cv.COLOR_RGBA2RGB)
         img2 = cv.cvtColor(img2, cv.COLOR_RGBA2RGB)
@@ -381,10 +380,12 @@ class TestDataset(Datasetbehaviour):
 
 
 class SchematicleLineDataset(Datasetbehaviour):
-    def __init__(self, size, *args):
-        super().__init__(size, self.__create, *args)
+    def __init__(self, size, *args, **kwargs):
+        super().__init__(size, self.__create, *args, **kwargs)
 
-    def __create(self, width, image_width, padding):
+    def __create(self, line_num, endpoint_num, width, image_width, padding):
+        rng = np.random.default_rng()
+
         def corrupt(start, end):
             end = Point(end)
             if point_set.contains(end):
@@ -428,7 +429,7 @@ class SchematicleLineDataset(Datasetbehaviour):
             return None
 
         def add_point(start: Annotated[list[float], 2]):
-            radius = 0.2
+            radius = 0.3
             fig.add_shape(
                 type="circle",
                 x0=start[0] - radius,
@@ -451,19 +452,16 @@ class SchematicleLineDataset(Datasetbehaviour):
                 fillcolor=color,
             )
 
-        def draw(rng, special):
+        def draw(endpoint_num, rng):
             nonlocal line_set, point_set
             target = []
             start = rng.integers(0, width, 2)
             if point_set.contains(Point(start)) or line_set.contains(Point(start)):
                 exit()
             point_set = point_set.union(Point(start))
-            # add_box(start, "red" if special else "green", 0.5 if special else 0.2)
+            add_box(start, "gray")
 
-            endpoint_num = rng.integers(2, 7)
-            if not special:
-                endpoint_num = 5
-
+            endpoint_num = rng.integers(1, endpoint_num)
             middle = rng.integers(0, width, 2)
             linepoint = add_line(start, middle)
 
@@ -475,13 +473,13 @@ class SchematicleLineDataset(Datasetbehaviour):
                 if linepoint2 is None:
                     exit()
             # add some end point
-            for _ in range(min(endpoint_num, 3)):
+            for _ in range(endpoint_num):
                 for _ in range(5):
                     end = rng.integers(0, width, 2)
                     linepoint = add_line(middle, end)
                     if linepoint is not None:
                         add_box(end, "gray")
-                        target.append((end + 1) / (width + 2) * 100)
+                        target.append(end)
                         break
                 else:
                     exit()
@@ -493,60 +491,61 @@ class SchematicleLineDataset(Datasetbehaviour):
                     linepoint = add_line(middle2, end)
                     if linepoint is not None:
                         add_box(end, "gray")
-                        target.append((end + 1) / (width + 2) * 100)
+                        target.append(end)
                         break
                 else:
                     exit()
             if endpoint_num > 4:
                 add_point(middle2)
-            return start, target
+            return np.float32(start), np.float32(target)
 
+        layout = go.Layout(
+            xaxis=dict(
+                showline=False,
+                showgrid=False,
+                zeroline=False,
+                showticklabels=False,
+                range=[-padding, width + padding]),
+            yaxis=dict(
+                showline=False,
+                showgrid=False,
+                zeroline=False,
+                showticklabels=False,
+                scaleanchor="x", scaleratio=1,
+                range=[-padding, width + padding]
+            ),
+            paper_bgcolor='white',
+            plot_bgcolor='white',
+            width=image_width,
+            height=image_width,
+            margin=dict(l=0, r=0, b=0, t=0, pad=0),
+        )
         while True:
             try:
-                layout = go.Layout(
-                    xaxis=dict(
-                        showline=False,
-                        showgrid=False,
-                        zeroline=False,
-                        showticklabels=False,
-                        range=[-padding, width + padding]),
-                    yaxis=dict(
-                        showline=False,
-                        showgrid=False,
-                        zeroline=False,
-                        showticklabels=False,
-                        scaleanchor="x", scaleratio=1,
-                        range=[-padding, width + padding]
-                    ),
-                    paper_bgcolor='white',
-                    plot_bgcolor='white',
-                    width=image_width,
-                    height=image_width,
-                    margin=dict(l=0, r=0, b=0, t=0, pad=0),
-                )
                 fig = go.Figure(layout=layout)
                 line_set = MultiLineString()
                 point_set = MultiPoint()
-                start, target = draw(rng, True)
-                start = np.array((start + 1) / (width + 2) * 100)
-                for _ in range(2):
-                    draw(rng, False)
+                start, target = draw(endpoint_num, rng)
+                # add_box(start, "red", 0.5)
+                start = np.array((start + padding) / (width + 2 * padding) * 100)
+                target = np.array((target + padding) / (width + 2 * padding) * 100)
+                for _ in range(line_num):
+                    draw(endpoint_num, rng)
 
                 image_bytes = fig.to_image(format="jpg")
                 image_np = np.array(Image.open(io.BytesIO(image_bytes)))
-                target_padding = np.zeros((6, 2))
-                target_padding.fill(-1)
-                target = np.array(target)
-                target_padding[:len(target)] = target
+                target_padding = np.full((endpoint_num, 2), -1)
+                target_padding[:len(target)] = np.array(target)
                 return (image_np, start), target_padding
             except StopExecution:
                 pass
 
 
 class SchematicleGroundTruth(Datasetbehaviour):
-    def __init__(self):
+    def __init__(self, width, output_num):
         dataset = []
         root = Path("connect")
+        max_output_num = 0
         for path in (root / "XML").glob("*.json"):
             components = []
             nets = []
@@ -559,35 +558,65 @@ class SchematicleGroundTruth(Datasetbehaviour):
                     elif shape["label"] == "net":
                         nets.append(shape)
             components_id_table = {}
-            for c in components:
-                components_id_table[int(c["group_id"])] = c
-                # cv.rectangle(image, np.int32((c["points"][0])),
-                #              np.int32((c["points"][1])), (0, 255, 0), 2)
-            image = cv.imread(str(root / f"{path.stem}.jpg"))
-            image = reshape_to_square(image, 400)
+
             try:
+                for c in components:
+                    components_id_table[int(c["group_id"])] = c
+                    # cv.rectangle(image, np.int32((c["points"][0])),
+                    #              np.int32((c["points"][1])), (0, 255, 0), 2)
+                image = cv.imread(str(root / f"{path.stem}.jpg"))
+                ori_image_height, ori_image_width = image.shape[:2]
+
+                image, image_ratio = reshape_to_square(image, width, verbose=True)
                 for net_order, net in enumerate(nets):
+                    max_output_num = max(max_output_num, len(net["points"]))
                     for order in range(len(net["points"])):
                         point_set = [net["points"][order]]
                         # description = list(map(lambda x: list(map(int, x.split(","))),
                         #                     net["description"].split(";")))
-                        for n in net["points"]:
-                            point_set.append(n)
+                        point_set.extend(net["points"])
                         del point_set[order + 1]
-                        # debug
+
+                        point_set = np.array(point_set)
+                        if image_ratio < 1:
+                            point_set[:, 0] = point_set[:, 0] / ori_image_width
+                            point_set[:, 1] = point_set[:, 1] / ori_image_width
+                        else:
+                            point_set[:, 0] = point_set[:, 0] / ori_image_height
+                            point_set[:, 1] = point_set[:, 1] / ori_image_height
+
+                        if image_ratio < 1:
+                            point_set[:, 1] += abs(1 - image_ratio) / 2
+                        else:
+
+                            point_set[:, 0] += abs(1 - image_ratio) / 2
+                        # print(image_ratio)
+                        point_set *= 100
+
                         img = image.copy()
-                        # cv.circle(img, np.int32(point_set[0]), 5, (255, 0, 0), -1)
-                        # for point in point_set[1:]:
-                        #     cv.circle(img, np.int32(point), 5, (0, 0, 255), -1)
+                        # debug
+                        # if len(point_set) == 11:
+                        #     cv.circle(img, np.int32(point_set[0]), 5, (255, 0, 0), -1)
+                        #     for point in point_set[1:]:
+                        #         cv.circle(img, np.int32(point), 5, (0, 0, 255), -1)
+                        #     plot_images(img, -1)
+                        #     exit()
+                        point_set = point_set.tolist()
+                        for i in range(output_num - len(point_set) + 1):
+                            point_set.append([-1, -1])
+                        point_set = np.array(point_set)
                         dataset.append(((img, point_set[0]), point_set[1:]))
                     # start_box = components_id_table[description[0][order]]
                     # cv.rectangle(image, *np.int32((start_box["points"])), (0, 0, 255), 2)
+
             except Exception as e:
+                if isinstance(e, StopExecution):
+                    raise e
                 print(path, net_order + 1, e)
+        print("max_output_num:", max_output_num)
         self.dataset = dataset
         self.MP = False
         self.i = 0
-        self.a = 0
         super().__init__(len(self.dataset), self.__create)
 
     def __create(self):
@@ -596,15 +625,176 @@ class SchematicleGroundTruth(Datasetbehaviour):
         return ret
 
 
+class DoubleLineFormalDataset(Datasetbehaviour):
+    def __init__(self, size):
+        super().__init__(size, self.__create)
+
+    def __create(self):
+        width = 10
+        layout = go.Layout(
+            xaxis=dict(
+                showline=False,
+                showgrid=False,
+                zeroline=False,
+                showticklabels=False,
+                range=[-1, 11]),
+            yaxis=dict(
+                showline=False,
+                showgrid=False,
+                zeroline=False,
+                showticklabels=False,
+                scaleanchor="x", scaleratio=1,
+                range=[-1, 11]
+            ),
+            paper_bgcolor='white',
+            plot_bgcolor='white',
+            width=200,
+            height=200,
+            margin=dict(l=0, r=0, b=0, t=0, pad=0),
+        )
+
+        def create_img_v2(rng):
+            def corrupt(start, end):
+                end = Point(end)
+                if p.contains(end):
+                    return True
+                if not l.intersection(end).is_empty:
+                    return True
+                line = LineString([start, end])
+                intersection = p.intersection(line)
+                if not intersection.is_empty and intersection != start:
+                    return True
+                intersection = l.intersection(line)
+                if intersection.length > 0:
+                    return True
+                return False
+
+            def add_line(start, end):
+                nonlocal l, p
+                start, end = Point(start), Point(end)
+                if start.x == end.x or start.y == end.y:
+                    if corrupt(start, end):
+                        return None
+                    l = l.union(LineString([start, end]))
+                    p = p.union(Point(end))
+                    fig.add_shape(type="line",
+                                  x0=start.x, y0=start.y, x1=end.x, y1=end.y,
+                                  line=dict(color="black", width=2)
+                                  )
+                    return np.array([end.x, end.y])
+                else:
+                    mid = [start.x, end.y]
+                    if not (corrupt(start, mid) or corrupt(mid, end)):
+                        add_line(start, mid)
+                        add_line(mid, end)
+                        return np.array(mid)
+                    mid = [end.x, start.y]
+                    if not (corrupt(start, mid) or corrupt(mid, end)):
+                        add_line(start, mid)
+                        add_line(mid, end)
+                        return np.array(mid)
+
+                return None
+
+            def add_point(start: Annotated[list[float], 2]):
+                radius = 0.15
+                fig.add_shape(
+                    type="circle",
+                    x0=start[0] - radius,
+                    y0=start[1] - radius,
+                    x1=start[0] + radius,
+                    y1=start[1] + radius,
+                    line=dict(color="black"),  # color of the circle
+                    # fill=dict(color="red")  # color of the circle
+                    fillcolor="black"
+                )
+
+            def add_box(start: Annotated[list[float], 2], color, radius=0.2):
+                fig.add_shape(
+                    type="rect",
+                    x0=start[0] - radius,
+                    y0=start[1] - radius,
+                    x1=start[0] + radius,
+                    y1=start[1] + radius,
+                    line=dict(color=color),
+                    fillcolor=color,
+                )
+
+            def draw(rng, special):
+                nonlocal l, p
+                target = []
+                start = rng.integers(0, width, 2)
+                if p.contains(Point(start)) or l.contains(Point(start)):
+                    exit()
+                p = p.union(Point(start))
+                add_box(start, "red" if special else "green", 0.5 if special else 0.2)
+
+                for _ in range(5):
+                    middle = rng.integers(0, width, 2)
+                    linepoint = add_line(start, middle)
+                    if linepoint is not None:
+                        break
+                else:
+                    exit()
+                # add some end point
+                for _ in range(2):
+                    for _ in range(5):
+                        end = rng.integers(0, width, 2)
+                        linepoint = add_line(middle, end)
+                        if linepoint is not None:
+                            add_box(end, "gray")
+                            target.append((end + 1) / (width + 2) * 100)
+                            break
+                    else:
+                        exit()
+                return start, target
+            fig = go.Figure(layout=layout)
+            l = MultiLineString()
+            p = MultiPoint()
+            start, target = draw(rng, True)
+            draw(rng, False)
+            # draw(rng, False)
+            # draw(rng, False)
+
+            image_bytes = fig.to_image(format="jpg")
+            image_np = np.array(Image.open(io.BytesIO(image_bytes)))
+            return (image_np, np.array((start + 1) / (width + 2) * 100), np.array(target)), np.array(target)
+        while True:
+            try:
+                img, target = create_img_v2(rng)
+                return img, target
+            except StopExecution:
+                pass
+
+
 if __name__ == "__main__":
-    # plot_images(MessyDataset(10), 200)
+    pass
+    # plot_images(MessyDataset(5), 200)
     # plot_images(GroundTruthDataset(10), 200)
     # plot_images(TestDataset(3), 150)
-    # dataset = SchematicleLineDataset(10, 40, 400)
-    # plot_images([d[0][0] for d in dataset])
 
-    dataset = SchematicleLineDataset(5, 40, 400, 5)
-    plot_images([d[0][0] for d in dataset], -1)
+    # Datasetbehaviour.MP = True
+    # # Datasetbehaviour.RESET = True
+    # dataset = SchematicleLineDataset(10000, line_num=3, endpoint_num=10,
+    #                                  width=40, image_width=400, padding=20)
+    # dataset[0]
+    # imgs = []
+    # for d in dataset:
+    #     img = d[0][0]
+    #     width = img.shape[0]
+    #     ratio = width / 100.0
+    #     start = d[0][1]
+    #     ends = d[1]
+    #     print(ends)
+    #     start = start * ratio
+    #     ends = ends * ratio
 
-    dataset = SchematicleGroundTruth()
-    plot_images([d[0][0] for d in dataset], -1)
+    #     ends = d[1] * ratio
+    #     cv.circle(img, (int(start[0]), width - int(start[1])), 3, (0, 255, 0), -1)
+    #     for e in ends:
+    #         cv.circle(img, (int(e[0]), width - int(e[1])), 3, (255, 0, 0), -1)
+    #     imgs.append(img)
+    # plot_images(imgs, -1)
+
+    # dataset = SchematicleGroundTruth(400, 10)
+    # plot_images([d[0][0] for d in dataset[:3]], 400)

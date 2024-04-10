@@ -3,12 +3,8 @@ from createdata import GroundTruthDataset, MessyDataset, TestDataset
 from Model import *
 
 width = 200
-d = MessyDataset(30000)
+d = MessyDataset(20000)
 d.MP = True
-d2 = GroundTruthDataset(10)
-plot_images(d2, 200, max_images=2)
-
-d = d.union_dataset(d2)
 # %%
 transform = transforms.Compose(
     [
@@ -23,12 +19,12 @@ ytransform = transforms.Compose(
         transforms.ToImage(),
         transforms.Grayscale(),
         transforms.Resize((width, width)),
-        ThresholdTransform(150),
-        transforms.ToDtype(torch.float32, scale=False),
+        # ThresholdTransform(150),
+        transforms.ToDtype(torch.float32, scale=True),
     ]
 )
 model = Model("autoencoder", data=d, transform=transform,
-              ytransform=ytransform, batch_size=512, shuffle=True)
+              ytransform=ytransform, batch_size=256, shuffle=True)
 plot_images(model, 200, max_images=2)
 # %%
 d3 = TestDataset(3)
@@ -72,6 +68,7 @@ class Autoencoder(nn.Module):
     def forward(self, x, y):
         x = self.encoder(x)
         x = self.decoder(x)
+
         return x
 
 
@@ -136,12 +133,10 @@ m = TransformerAutoencoder(
 
 model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-2), epochs=1000)
 model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-3), epochs=1000)
-# model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-4), epochs=200)
+# model.fit(m, nn.MSELoss(), optim.Adam(m.parameters(), lr=1e-4), epochs=200, amp=False)
 # model.fit(m, nn.MSELoss(), optim.SGD(m.parameters(), lr=1e-4), epochs=2000)
 # %%
 result = model.inference(MessyDataset(10))
-plot_images(result, img_width=200, max_images=10)
-result = model.inference(GroundTruthDataset(10))
 plot_images(result, img_width=200, max_images=10)
 result = model.inference(TestDataset(3))
 plot_images(result, img_width=300)

@@ -452,6 +452,28 @@
       "shape_type": "polygon",
       "flags": {},
       "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          440.3085106382979,
+          133.0531914893617
+        ],
+        [
+          459.98936170212767,
+          86.24468085106382
+        ],
+        [
+          422.7553191489362,
+          85.71276595744679
+        ]
+      ],
+      "group_id": null,
+      "description": "0, -1, -1; 2, -1, -1",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
     }
   ],
   "imagePath": "..\\001345.jpg",

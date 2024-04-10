@@ -1,5 +1,5 @@
 {
-  "version": "5.3.1",
+  "version": "5.4.1",
   "flags": {},
   "shapes": [
     {
@@ -18,7 +18,8 @@
       "group_id": 0,
       "description": "",
       "shape_type": "rectangle",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "flag": {},
@@ -36,7 +37,8 @@
       "group_id": 1,
       "description": "",
       "shape_type": "rectangle",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "flag": {},
@@ -54,7 +56,8 @@
       "group_id": 2,
       "description": "",
       "shape_type": "rectangle",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "flag": {},
@@ -72,7 +75,8 @@
       "group_id": 3,
       "description": "",
       "shape_type": "rectangle",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "flag": {},
@@ -90,7 +94,8 @@
       "group_id": 4,
       "description": "",
       "shape_type": "rectangle",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "label": "net",
@@ -107,7 +112,8 @@
       "group_id": null,
       "description": "-1, 2; -1, 0",
       "shape_type": "polygon",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "label": "net",
@@ -124,7 +130,8 @@
       "group_id": null,
       "description": "-1, 2; -1, 1",
       "shape_type": "polygon",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "label": "net",
@@ -141,7 +148,8 @@
       "group_id": null,
       "description": "-1, 3; -1, 1",
       "shape_type": "polygon",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "label": "net",
@@ -158,7 +166,8 @@
       "group_id": null,
       "description": "2, 3; 2, 0",
       "shape_type": "polygon",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "label": "net",
@@ -175,7 +184,8 @@
       "group_id": null,
       "description": "3, 0; 2, 0",
       "shape_type": "polygon",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "label": "net",
@@ -192,7 +202,8 @@
       "group_id": null,
       "description": "-1, 4; -1, 0",
       "shape_type": "polygon",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "label": "net",
@@ -209,7 +220,8 @@
       "group_id": null,
       "description": "-1, 4; -1, 1",
       "shape_type": "polygon",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "label": "net",
@@ -226,7 +238,8 @@
       "group_id": null,
       "description": "4, 0; 2, 1",
       "shape_type": "polygon",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "label": "net",
@@ -243,7 +256,8 @@
       "group_id": null,
       "description": "-1, 1; -1, 1",
       "shape_type": "polygon",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "label": "net",
@@ -260,7 +274,26 @@
       "group_id": null,
       "description": "0, 1; 2, 0",
       "shape_type": "polygon",
-      "flags": {}
+      "flags": {},
+      "mask": null
+    },
+    {
+      "label": "net",
+      "points": [
+        [
+          434.90804597701145,
+          210.39080459770113
+        ],
+        [
+          475.59770114942523,
+          210.39080459770113
+        ]
+      ],
+      "group_id": null,
+      "description": "1, -1; 2, -1",
+      "shape_type": "polygon",
+      "flags": {},
+      "mask": null
     }
   ],
   "imagePath": "..\\001900.jpg",

@@ -22,6 +22,7 @@ from typing import Annotated
 
 import cv2
 import cv2 as cv
+import einops
 import ipyplot
 import IPython
 import matplotlib.pyplot as plt
@@ -84,16 +85,13 @@ rng = np.random.default_rng()
 
 
 class Datasetbehaviour:
-    def __init__(self, size, creater: abc.Callable, *args):
+    def __init__(self, size, creater: abc.Callable, *args, **kwargs):
         self.size = size
-        self.creater = creater
-        self.args = args
-        key = inspect.getsource(type(self)) + str(args) + str(size)
+        self.creater = lambda: creater(*args, **kwargs)
+        key = inspect.getsource(type(self)) + str(args) + str(kwargs) + str(size)
         filepath = self.__get_filepath(key)
         self.filepath = str(filepath)
         self.__dataset = None
-        self.RESET = False
-        self.MP = False
 
     def __get_filepath(self, key: str):
         class_name = type(self).__name__
@@ -105,30 +103,28 @@ class Datasetbehaviour:
 
     def __load(self):
         print("[dataset creation]")
-        if Path(self.filepath).exists() and not self.RESET:
+        print("- New:", Datasetbehaviour.RESET)
+        print("- Multiple Processes:", Datasetbehaviour.MP)
+        if Path(self.filepath).exists() and not Datasetbehaviour.RESET:
             print("    [cache found]:")
             print(textwrap.fill(self.filepath, 70, initial_indent=" " * 4))
             self.__dataset = pickle.load(open(self.filepath, "rb"))
         else:
-            if not self.MP:
+            if not Datasetbehaviour.MP:
                 dataset = []
                 for _ in tqdm(range(self.size)):
-                    rng = np.random.default_rng()
-                    dataset.append(self.creater(*self.args))
+                    dataset.append(self.creater())
             else:
-                def create():
-                    rng = np.random.default_rng()
-                    return self.creater(*self.args)
 
                 dataset = p_tqdm.p_umap(
-                    create,
+                    lambda _: self.creater(),
                     range(self.size),
                     num_cpus=os.cpu_count() - 4,
                 )
             self.__dataset = list(map(list, zip(*dataset)))
             pickle.dump(self.__dataset, open(self.filepath, "wb"))
         print("--- [finish creation] ---\n")
-        self.loaded = True
+        Datasetbehaviour.reset()
 
     def __getitem__(self, idx):
         if self.__dataset is None:
@@ -136,7 +132,15 @@ class Datasetbehaviour:
         if isinstance(idx, slice):
             return list(zip(self.__dataset[0][idx], self.__dataset[1][idx]))
         else:
-            return self.__dataset[0][idx], self.__dataset[1][idx]
+            return list(zip(self.__dataset[0][idx:idx + 1], self.__dataset[1][idx:idx + 1]))[0]
+
+    def get(self, idx):
+        if self.__dataset is None:
+            self.__load()
+        if isinstance(idx, slice):
+            return list(zip(self.__dataset[0][idx], self.__dataset[1][idx]))
+        else:
+            return list(zip(self.__dataset[0][idx:idx + 1], self.__dataset[1][idx:idx + 1]))
 
     def __len__(self):
         if self.__dataset is None:
@@ -159,12 +163,22 @@ class Datasetbehaviour:
                 else:
                     dataset[j][i] = torch.tensor(np.asarray(dataset[j][i]))
 
+    def dataset(self):
+        return self.__dataset
+
     def union_dataset(self, instance):
         if self.__dataset is None:
             self.__load()
-        self.__dataset[0] += instance.dataset[0]
-        self.__dataset[1] += instance.dataset[1]
+        self.__dataset[0] += instance.dataset()[0]
+        self.__dataset[1] += instance.dataset()[1]
         return self
+
+    def reset():
+        Datasetbehaviour.MP = False
+        Datasetbehaviour.RESET = False
+
+
+Datasetbehaviour.reset()
 
 
 class Model:
@@ -178,20 +192,22 @@ class Model:
         batch_size=64,
         validation_split=0.1,
         shuffle=False,
+        amp=True,
+        cudnn=True
     ):
         self.name = name
         self.transform = transform
         self.ytransform = ytransform
         if self.transform is None:
-            self.transform = lambda x: torch.tensor(x).float()
+            self.transform = lambda x: torch.tensor(x).float().cuda()
         if self.ytransform is None:
-            self.ytransform = lambda x: torch.tensor(x).float()
+            self.ytransform = lambda x: torch.tensor(x).float().cuda()
         select_gpu_with_most_free_memory()
         # torch.set_default_device('cuda')
-        dataset = self.preprocessing(data)
+        self.dataset = self.preprocessing(data)
         train_dataset, test_dataset = torch.utils.data.random_split(
-            dataset,
-            [tn := int(len(dataset) * (1 - validation_split)), len(dataset) - tn],
+            self.dataset,
+            [tn := int(len(self.dataset) * (1 - validation_split)), len(self.dataset) - tn],
         )
         self.train_loader = DataLoader(
             dataset=train_dataset,
@@ -208,14 +224,13 @@ class Model:
             # num_workers=os.cpu_count(),
             # persistent_workers=True,
         )
-        self.ep = 0
-        self.total_time = 0
         self.eval_metrics = eval_metrics
         self.model = None
         self.model_id = None
-        torch.cuda.empty_cache()
-        self.interrupt = False
-        self.tensorboard_setting()
+
+        self.gc()
+        self.amp = amp
+        torch.backends.cudnn.benchmark = cudnn
 
     def tensorboard_setting(self):
         self.writer = SummaryWriter(comment=self.name)
@@ -229,39 +244,44 @@ class Model:
 
     def preprocessing(self, data: Datasetbehaviour):
         print("[data preprocessing]")
-        transform_id = data.filepath
-        try:
-            transform_id += inspect.getsource(self.transform)
-        except:
-            transform_id += str(self.transform)
-        try:
-            transform_id += inspect.getsource(self.ytransform)
-        except:
-            transform_id += str(self.ytransform)
+        load_from_cache = isinstance(data, Datasetbehaviour)
+        if load_from_cache:
+            transform_id = data.filepath
+            try:
+                transform_id += inspect.getsource(self.transform)
+            except:
+                transform_id += str(self.transform)
+            try:
+                transform_id += inspect.getsource(self.ytransform)
+            except:
+                transform_id += str(self.ytransform)
 
-        filepath = (
-            Path(data.filepath).parent
-            / "cache"
-            / Path(hashlib.sha256(transform_id.encode("utf-8")).hexdigest())
-        )
-        if filepath.exists():
+            filepath = (
+                Path(data.filepath).parent
+                / "cache"
+                / Path(hashlib.sha256(transform_id.encode("utf-8")).hexdigest())
+            )
+        if load_from_cache and filepath.exists():
             print("    [cache found]:")
             print(textwrap.fill(str(filepath), 70, initial_indent=" " * 4))
             result = pickle.load(open(filepath, "rb"))
         else:
-            filepath.parent.mkdir(parents=True, exist_ok=True)
-            result = [[self.transform(x[0]), self.ytransform(x[1])] for x in tqdm(data)]
-            pickle.dump(result, open(filepath, "wb"))
-        result = [[x[0].cuda(non_blocking=True), x[1].cuda(non_blocking=True)] for x in result]
+            if isinstance(data, Datasetbehaviour):
+                result = [[self.transform(x[0]), self.ytransform(x[1])] for x in tqdm(data[:])]
+            else:
+                result = [[self.transform(x[0]), self.ytransform(x[1])] for x in tqdm(data)]
+            if load_from_cache:
+                filepath.parent.mkdir(parents=True, exist_ok=True)
+                pickle.dump(result, open(filepath, "wb"))
+        # result = [[x[0].cuda(non_blocking=True), x[1].cuda(non_blocking=True)] for x in result]
         print("--- [finish preprocessing] ---\n")
         return result
 
-    def fit(self, model, criterion, optimizer, epochs=1, compile=False, amp=True, target_transform=lambda y_hat, y: y):
+    def fit(self, model, criterion, optimizer, epochs=1, compile=False, target_transform=lambda y_hat, y: y):
         if id(model) != self.model_id:
             self.model_id = id(model)
             self.gc()
-            torch.backends.cudnn.benchmark = True
-            self.model = model.to(device="cuda")
+            self.model = model.cuda()
             self.model_overview(self.model)
             print(f"Model: {self.model.__class__.__name__}, ID:{self.model_id}")
             # accelerate trining speed
@@ -276,9 +296,9 @@ class Model:
             start = self.ep
             end = self.ep + epochs
 
-            early_stopping_monitor = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=15)
-            if amp:
+            if self.amp:
                 scaler = torch.cuda.amp.GradScaler()
+            early_stopping_monitor = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=15)
             for ep in range(start, end):
                 self.model.train()
                 with tqdm(
@@ -289,32 +309,39 @@ class Model:
                     train_loss = []
                     pbar.set_postfix({"loss": "---", "acc": "---"})
                     for data, target in self.train_loader:
-                        def train():
-                            y_hat = self.model(data, target)
+                        try:
+                            if self.amp:
+                                with torch.cuda.amp.autocast():
+                                    y_hat = self.model(data, target)
+                                    loss = self.loss(y_hat, target, criterion, eval=False,
+                                                     target_transform=target_transform)
+                                    optimizer.zero_grad()
+                                    loss.backward()
+                                    # scaler.scale(loss).backward()
+                                    # scaler.step(optimizer)
+                                    # scaler.update()
+                            else:
+                                y_hat = self.model(data, target)
+                                loss = self.loss(y_hat, target, criterion, eval=False,
+                                                 target_transform=target_transform)
+                                optimizer.zero_grad()
+                                loss.backward()
+
+                            optimizer.step()
                             if ep == 0:
                                 from torchviz import make_dot
                                 graph = make_dot(y_hat, params=dict(model.named_parameters()))
                                 graph.render(Path(self.writer.log_dir) /
                                              "model_graph", format="png")
-                                # png_graph = graph.pipe(format='png')
-                                # png_graph = Image.open(io.BytesIO(png_graph))
-                                # png_graph = np.array(png_graph)
-                                # self.writer.add_image("Model Graph", png_graph, dataformats='HWC')
+
+                            # torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1)
+                            train_loss.append(loss)
+                            pbar.set_postfix({"loss": f"{loss:.3E}", "acc": "---"})
+                            pbar.update(1)
+                        except Exception as e:
+                            # print("Error in loss calculation", e)
+                            print("!!!-------- Error captured --------!!!")
                             try:
-                                loss = self.loss(y_hat, target, criterion, eval=False,
-                                                 target_transform=target_transform)
-                                optimizer.zero_grad()
-                                if amp:
-                                    scaler.scale(loss).backward()
-                                else:
-                                    loss.backward()
-                                torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1)
-                                optimizer.step()
-                                train_loss.append(loss)
-                                pbar.update(1)
-                            except Exception as e:
-                                # print("Error in loss calculation", e)
-                                print("!!!-------- Error captured --------!!!")
                                 error = tabulate(
                                     [
                                         ["y_hat", y_hat.dtype, list(y_hat.shape)],
@@ -324,13 +351,9 @@ class Model:
                                     tablefmt="psql",
                                 )
                                 print(error)
-                                print(e)
-                                exit()
-                        if amp:
-                            with torch.cuda.amp.autocast():
-                                train()
-                        else:
-                            train()
+                            except:
+                                pass
+                            raise e
 
                     train_loss = torch.stack(train_loss).mean()
                     self.writer.add_scalar("Loss/train", train_loss, ep + 1)
@@ -367,19 +390,36 @@ class Model:
     def predict(self, data: torch.tensor, target: torch.tensor):
         return self.model(data, target)
 
-    def __call__(self, data, target):
-        return self.predict(data.unsqueeze(0).unsqueeze(0).cuda(), target.unsqueeze(0).unsqueeze(0).cuda())
+    # def __call__(self, data, target):
+    #     return self.predict(self.transform(data), self.ytransform(target).unsqueeze(0).unsqueeze(0).cuda())
 
-    def inference(self, testset):
+    @torch.no_grad()
+    def inference(self, testset, preprocessing=False, verbose=True):
         self.model.eval()
-        testset = self.preprocessing(testset)
+        if not preprocessing:
+            testset = self.preprocessing(testset)
         loader = DataLoader(dataset=testset, batch_size=len(testset))
         x = next(iter(loader))[0]
         y = next(iter(loader))[1]
-        return list(zip(x, self.predict(x, y).cpu(), y.cpu()))
+        if verbose:
+            return list(zip(x, self.predict(x, y).cpu(), y.cpu()))
+        else:
+            return self.predict(x, y).cpu()
+
+    # def __call__(self, x, y) -> gc.Any:
+    #     x = self.transform(x)
+    #     y = self.ytransform(y)
+    #     return self.model(x, y)
 
     def loss(self, y_hat, y, criterion, eval, target_transform):
-        y = target_transform(y_hat, y)
+        try:
+            y = target_transform(y_hat, y)
+        except Exception as e:
+            if self.amp and isinstance(e, ValueError):
+                pass
+            else:
+                raise (e)
+            # pass
         if eval and self.eval_metrics:
             return self.eval_metrics(criterion, y_hat, y)
         else:
@@ -426,13 +466,11 @@ class Model:
     def load(self, name):
         self.model.load_state_dict(torch.load(name))
 
-    def __getitem__(self, size):
-        loader = next(iter(self.train_loader))
-        ret = list(zip(loader[0][size].cpu(), loader[1][size].cpu()))
-        if isinstance(size, slice):
-            return ret
+    def __getitem__(self, size, single=False):
+        if not single:
+            return self.dataset[size]
         else:
-            return ret[0]
+            return self.dataset[size:size + 1]
 
     def gc(self):
         collected = gc.collect()
@@ -586,6 +624,14 @@ def visualize_attentions(maps):
     fig.show()
 
 
+def static_vars(**kwargs):
+    def decorate(func):
+        for k in kwargs:
+            setattr(func, k, kwargs[k])
+        return func
+    return decorate
+
+
 def flatten_list(lst):
     flattened_list = []
     for item in lst:
@@ -616,12 +662,18 @@ def plot_images(images, img_width=None, max_images=5):
             images[i] = images[i].astype(np.uint8)
 
     cols = len(images) // L
-    for i in range(0, len(images), cols):
+    if cols == 1:
         ipyplot.plot_images(
-            images[i: i + cols],
-            img_width=images[i].shape[0] if img_width == -
+            images, img_width=images[0].shape[0] if img_width == -
             1 else img_width if img_width else 200,
         )
+    else:
+        for i in range(0, len(images), cols):
+            ipyplot.plot_images(
+                images[i: i + cols],
+                img_width=images[i].shape[0] if img_width == -
+                1 else img_width if img_width else 200,
+            )
 
 
 class ThresholdTransform(object):
@@ -635,7 +687,7 @@ class ThresholdTransform(object):
         return f"ThresholdTransform({self.thr})"
 
 
-def reshape_to_square(image, desired_size, color=(255, 255, 255)):
+def reshape_to_square(image, desired_size, color=(255, 255, 255), verbose=False):
     old_image_height, old_image_width, channels = image.shape
     ratio = old_image_height / old_image_width
     if ratio < 1:
@@ -651,5 +703,7 @@ def reshape_to_square(image, desired_size, color=(255, 255, 255)):
     y_center = (desired_size - old_image_height) // 2
     # copy img image into center of result image
     result[x_center:x_center + old_image_width, y_center:y_center + old_image_height] = image
-
-    return result
+    if verbose:
+        return result, ratio
+    else:
+        return result

@@ -1,5 +1,5 @@
 {
-  "version": "5.3.1",
+  "version": "5.4.1",
   "flags": {},
   "shapes": [
     {
@@ -18,7 +18,8 @@
       "group_id": 0,
       "description": "",
       "shape_type": "rectangle",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "flag": {},
@@ -36,7 +37,8 @@
       "group_id": 1,
       "description": "",
       "shape_type": "rectangle",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "flag": {},
@@ -54,7 +56,8 @@
       "group_id": 2,
       "description": "",
       "shape_type": "rectangle",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "flag": {},
@@ -72,7 +75,8 @@
       "group_id": 3,
       "description": "",
       "shape_type": "rectangle",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "flag": {},
@@ -90,7 +94,8 @@
       "group_id": 4,
       "description": "",
       "shape_type": "rectangle",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "flag": {},
@@ -108,7 +113,8 @@
       "group_id": 5,
       "description": "",
       "shape_type": "rectangle",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "flag": {},
@@ -126,7 +132,8 @@
       "group_id": 6,
       "description": "",
       "shape_type": "rectangle",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "flag": {},
@@ -144,7 +151,8 @@
       "group_id": 7,
       "description": "",
       "shape_type": "rectangle",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "label": "net",
@@ -173,7 +181,8 @@
       "group_id": null,
       "description": "0, 1, 2, 3, -1; 0, 0, 0, 0, -1",
       "shape_type": "polygon",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "label": "net",
@@ -194,7 +203,8 @@
       "group_id": null,
       "description": "0, 6, 5; 1, 0, 0",
       "shape_type": "polygon",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "label": "net",
@@ -215,7 +225,8 @@
       "group_id": null,
       "description": "1, 6, 4; 1, 1, 0",
       "shape_type": "polygon",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "label": "net",
@@ -236,7 +247,8 @@
       "group_id": null,
       "description": "2, 5, 7; 1, 1, 1",
       "shape_type": "polygon",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "label": "net",
@@ -261,7 +273,8 @@
       "group_id": null,
       "description": "3, 4, 7, -1; 1, 1, 0, -1",
       "shape_type": "polygon",
-      "flags": {}
+      "flags": {},
+      "mask": null
     },
     {
       "label": "net",
@@ -278,7 +291,8 @@
       "group_id": null,
       "description": "6, 7; 2, 2",
       "shape_type": "polygon",
-      "flags": {}
+      "flags": {},
+      "mask": null
     }
   ],
   "imagePath": "..\\002162.jpg",
