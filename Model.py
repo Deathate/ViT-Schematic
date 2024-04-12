@@ -1,4 +1,6 @@
 import collections.abc as abc
+import copy
+import datetime
 import gc
 import hashlib
 import inspect
@@ -50,6 +52,7 @@ from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from torch.utils.tensorboard import SummaryWriter
 from torchmetrics import Accuracy
 from torchmetrics.classification import MulticlassAccuracy
+from torchvision import models
 from tqdm.std import tqdm
 
 from utility import *
@@ -88,10 +91,16 @@ class Datasetbehaviour:
     def __init__(self, size, creater: abc.Callable, *args, **kwargs):
         self.size = size
         self.creater = lambda: creater(*args, **kwargs)
+        self.reset = Datasetbehaviour.RESET
         key = inspect.getsource(type(self)) + str(args) + str(kwargs) + str(size)
         filepath = self.__get_filepath(key)
+        print("** [Dataset creation]")
+        print("[Identify file path]:")
+        print(textwrap.fill(str(filepath), 70, initial_indent=" " * 4))
         self.filepath = str(filepath)
         self.__dataset = None
+        print("--- [finish creation] ---\n")
+        Datasetbehaviour.reset()
 
     def __get_filepath(self, key: str):
         class_name = type(self).__name__
@@ -177,6 +186,9 @@ class Datasetbehaviour:
         Datasetbehaviour.MP = False
         Datasetbehaviour.RESET = False
 
+    def view(self):
+        pprint(self[0])
+
 
 Datasetbehaviour.reset()
 
@@ -186,20 +198,24 @@ class Model:
         self,
         name,
         data,
-        transform=None,
-        ytransform=None,
-        eval_metrics=None,
         batch_size=64,
+        xtransform=None,
+        ytransform=None,
+        xytransform=None,
+        eval_metrics=None,
         validation_split=0.1,
-        shuffle=False,
+        shuffle=True,
         amp=True,
-        cudnn=True
+        cudnn=True,
+        suffix=""
     ):
         self.name = name
-        self.transform = transform
+        self.xtransform = xtransform
         self.ytransform = ytransform
-        if self.transform is None:
-            self.transform = lambda x: torch.tensor(x).float().cuda()
+        self.xytransform = xytransform
+        self.suffix = suffix
+        if self.xtransform is None:
+            self.xtransform = lambda x: torch.tensor(x).float().cuda()
         if self.ytransform is None:
             self.ytransform = lambda x: torch.tensor(x).float().cuda()
         select_gpu_with_most_free_memory()
@@ -228,12 +244,13 @@ class Model:
         self.model = None
         self.model_id = None
 
-        self.gc()
         self.amp = amp
         torch.backends.cudnn.benchmark = cudnn
 
-    def tensorboard_setting(self):
-        self.writer = SummaryWriter(comment=self.name)
+    def tensorboard_setting(self, name):
+        now = datetime.datetime.now()
+        logdir = "runs/" + now.strftime("%m%d_%H-%M-%S") + "_" + name + "/"
+        self.writer = SummaryWriter(comment=name, log_dir=logdir)
         layout = {
             "metrics": {
                 "loss": ["Multiline", ["Loss/train"]],
@@ -244,17 +261,21 @@ class Model:
 
     def preprocessing(self, data: Datasetbehaviour):
         print("[data preprocessing]")
-        load_from_cache = isinstance(data, Datasetbehaviour)
+        load_from_cache = isinstance(data, Datasetbehaviour) and not data.reset
         if load_from_cache:
             transform_id = data.filepath
             try:
-                transform_id += inspect.getsource(self.transform)
+                transform_id += inspect.getsource(self.xtransform)
             except:
-                transform_id += str(self.transform)
+                transform_id += str(self.xtransform)
             try:
                 transform_id += inspect.getsource(self.ytransform)
             except:
                 transform_id += str(self.ytransform)
+            try:
+                transform_id += inspect.getsource(self.xytransform)
+            except:
+                transform_id += str(self.xytransform)
 
             filepath = (
                 Path(data.filepath).parent
@@ -266,10 +287,19 @@ class Model:
             print(textwrap.fill(str(filepath), 70, initial_indent=" " * 4))
             result = pickle.load(open(filepath, "rb"))
         else:
-            if isinstance(data, Datasetbehaviour):
-                result = [[self.transform(x[0]), self.ytransform(x[1])] for x in tqdm(data[:])]
+            if self.xytransform is not None:
+                result = [[*list(self.xytransform(x[0], x[1]))] for x in tqdm(data)]
             else:
-                result = [[self.transform(x[0]), self.ytransform(x[1])] for x in tqdm(data)]
+                try:
+                    if isinstance(data, Datasetbehaviour):
+                        result = [[self.xtransform(x[0]).cuda(), self.ytransform(x[1]).cuda()]
+                                  for x in tqdm(data[:])]
+                    else:
+                        result = [[self.xtransform(x[0]), self.ytransform(x[1])]
+                                  for x in tqdm(data)]
+                except Exception as e:
+                    print("Error in transformation")
+                    raise (e)
             if load_from_cache:
                 filepath.parent.mkdir(parents=True, exist_ok=True)
                 pickle.dump(result, open(filepath, "wb"))
@@ -277,10 +307,11 @@ class Model:
         print("--- [finish preprocessing] ---\n")
         return result
 
-    def fit(self, model, criterion, optimizer, epochs=1, compile=False, target_transform=lambda y_hat, y: y):
+    def fit(self, model, criterion, optimizer, epochs=1, compile=False, target_transform=lambda y_hat, y: y, early_stopping=True):
         if id(model) != self.model_id:
             self.model_id = id(model)
             self.gc()
+            self.tensorboard_setting(self.name + self.suffix)
             self.model = model.cuda()
             self.model_overview(self.model)
             print(f"Model: {self.model.__class__.__name__}, ID:{self.model_id}")
@@ -353,6 +384,8 @@ class Model:
                                 print(error)
                             except:
                                 pass
+                            print("Removing log directory")
+                            shutil.rmtree(self.writer.log_dir)
                             raise e
 
                     train_loss = torch.stack(train_loss).mean()
@@ -369,10 +402,11 @@ class Model:
                     # self.writer.add_scalars('Loss', {'validation': val_loss,
                     #                                  'train': train_loss}, ep + 1)
                     pbar.set_postfix({"loss": f"{train_loss:.3E}", "acc": f"{val_loss:.3E}"})
-                    early_stopping_monitor.step(train_loss)
-                    if early_stopping_monitor.num_bad_epochs >= early_stopping_monitor.patience:
-                        print("Early Stopping")
-                        break
+                    if early_stopping:
+                        early_stopping_monitor.step(train_loss)
+                        if early_stopping_monitor.num_bad_epochs >= early_stopping_monitor.patience:
+                            print("Early Stopping")
+                            break
             self.ep = ep + 1
         except KeyboardInterrupt:
             print("Keyboard interrupt received.")
@@ -391,10 +425,11 @@ class Model:
         return self.model(data, target)
 
     # def __call__(self, data, target):
-    #     return self.predict(self.transform(data), self.ytransform(target).unsqueeze(0).unsqueeze(0).cuda())
+    #     return self.predict(self.xtransform(data), self.ytransform(target).unsqueeze(0).unsqueeze(0).cuda())
 
     @torch.no_grad()
     def inference(self, testset, preprocessing=False, verbose=True):
+        print("[inference]")
         self.model.eval()
         if not preprocessing:
             testset = self.preprocessing(testset)
@@ -402,12 +437,12 @@ class Model:
         x = next(iter(loader))[0]
         y = next(iter(loader))[1]
         if verbose:
-            return list(zip(x, self.predict(x, y).cpu(), y.cpu()))
+            return x, self.predict(x, y).cpu(), y.cpu()
         else:
             return self.predict(x, y).cpu()
 
     # def __call__(self, x, y) -> gc.Any:
-    #     x = self.transform(x)
+    #     x = self.xtransform(x)
     #     y = self.ytransform(y)
     #     return self.model(x, y)
 
@@ -466,11 +501,11 @@ class Model:
     def load(self, name):
         self.model.load_state_dict(torch.load(name))
 
-    def __getitem__(self, size, single=False):
-        if not single:
-            return self.dataset[size]
-        else:
-            return self.dataset[size:size + 1]
+    def __getitem__(self, size):
+        return self.dataset[size]
+
+    def view(self):
+        pprint(self[0])
 
     def gc(self):
         collected = gc.collect()
@@ -478,7 +513,6 @@ class Model:
         torch.cuda.empty_cache()
         self.ep = 0
         self.interrupt = False
-        self.tensorboard_setting()
         self.total_time = 0
 
 

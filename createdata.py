@@ -461,12 +461,14 @@ class SchematicleLineDataset(Datasetbehaviour):
             point_set = point_set.union(Point(start))
             add_box(start, "gray")
 
-            endpoint_num = rng.integers(1, endpoint_num)
             middle = rng.integers(0, width, 2)
             linepoint = add_line(start, middle)
 
             if linepoint is None:
                 exit()
+            endpoint_num = rng.integers(3, endpoint_num + 1)
+
+            print(endpoint_num)
             if endpoint_num >= 4:
                 middle2 = rng.integers(0, width, 2)
                 linepoint2 = add_line(start, middle2)
@@ -525,18 +527,40 @@ class SchematicleLineDataset(Datasetbehaviour):
                 fig = go.Figure(layout=layout)
                 line_set = MultiLineString()
                 point_set = MultiPoint()
+                target_all = []
                 start, target = draw(endpoint_num, rng)
+                answer = target
+                for x in target:
+                    # add_box(x, "red", 0.2)
+                    target_all.append(x)
+                add_box(start, "red", 0.5)
                 # add_box(start, "red", 0.5)
                 start = np.array((start + padding) / (width + 2 * padding) * 100)
-                target = np.array((target + padding) / (width + 2 * padding) * 100)
+                # target_box = []
+                # for x in target:
+                #     a = np.random.rand() * 3
+                #     b = np.random.rand() * 3
+                #     target_box.append([x[0] - a, x[1] + a])
+                #     target_box.append([x[0] + b, x[1] + b])
+                # print(target)
+                # print(target_box)
+                # target = np.array((target + padding) / (width + 2 * padding) * 100)
                 for _ in range(line_num):
-                    draw(endpoint_num, rng)
-
+                    start, target = draw(endpoint_num, rng)
+                    target_all.append(start)
+                    for x in target:
+                        target_all.append(x)
+                # print(target_all, target)
                 image_bytes = fig.to_image(format="jpg")
                 image_np = np.array(Image.open(io.BytesIO(image_bytes)))
+
                 target_padding = np.full((endpoint_num, 2), -1)
                 target_padding[:len(target)] = np.array(target)
-                return (image_np, start), target_padding
+                target_all = np.array(target_all)
+                # print(target_all)
+                # print(target_padding)
+                print(answer)
+                return (image_np, start, target_all), np.array(answer)
             except StopExecution:
                 pass
 
@@ -625,150 +649,15 @@ class SchematicleGroundTruth(Datasetbehaviour):
         return ret
 
 
-class DoubleLineFormalDataset(Datasetbehaviour):
-    def __init__(self, size):
-        super().__init__(size, self.__create)
-
-    def __create(self):
-        width = 10
-        layout = go.Layout(
-            xaxis=dict(
-                showline=False,
-                showgrid=False,
-                zeroline=False,
-                showticklabels=False,
-                range=[-1, 11]),
-            yaxis=dict(
-                showline=False,
-                showgrid=False,
-                zeroline=False,
-                showticklabels=False,
-                scaleanchor="x", scaleratio=1,
-                range=[-1, 11]
-            ),
-            paper_bgcolor='white',
-            plot_bgcolor='white',
-            width=200,
-            height=200,
-            margin=dict(l=0, r=0, b=0, t=0, pad=0),
-        )
-
-        def create_img_v2(rng):
-            def corrupt(start, end):
-                end = Point(end)
-                if p.contains(end):
-                    return True
-                if not l.intersection(end).is_empty:
-                    return True
-                line = LineString([start, end])
-                intersection = p.intersection(line)
-                if not intersection.is_empty and intersection != start:
-                    return True
-                intersection = l.intersection(line)
-                if intersection.length > 0:
-                    return True
-                return False
-
-            def add_line(start, end):
-                nonlocal l, p
-                start, end = Point(start), Point(end)
-                if start.x == end.x or start.y == end.y:
-                    if corrupt(start, end):
-                        return None
-                    l = l.union(LineString([start, end]))
-                    p = p.union(Point(end))
-                    fig.add_shape(type="line",
-                                  x0=start.x, y0=start.y, x1=end.x, y1=end.y,
-                                  line=dict(color="black", width=2)
-                                  )
-                    return np.array([end.x, end.y])
-                else:
-                    mid = [start.x, end.y]
-                    if not (corrupt(start, mid) or corrupt(mid, end)):
-                        add_line(start, mid)
-                        add_line(mid, end)
-                        return np.array(mid)
-                    mid = [end.x, start.y]
-                    if not (corrupt(start, mid) or corrupt(mid, end)):
-                        add_line(start, mid)
-                        add_line(mid, end)
-                        return np.array(mid)
-
-                return None
-
-            def add_point(start: Annotated[list[float], 2]):
-                radius = 0.15
-                fig.add_shape(
-                    type="circle",
-                    x0=start[0] - radius,
-                    y0=start[1] - radius,
-                    x1=start[0] + radius,
-                    y1=start[1] + radius,
-                    line=dict(color="black"),  # color of the circle
-                    # fill=dict(color="red")  # color of the circle
-                    fillcolor="black"
-                )
-
-            def add_box(start: Annotated[list[float], 2], color, radius=0.2):
-                fig.add_shape(
-                    type="rect",
-                    x0=start[0] - radius,
-                    y0=start[1] - radius,
-                    x1=start[0] + radius,
-                    y1=start[1] + radius,
-                    line=dict(color=color),
-                    fillcolor=color,
-                )
-
-            def draw(rng, special):
-                nonlocal l, p
-                target = []
-                start = rng.integers(0, width, 2)
-                if p.contains(Point(start)) or l.contains(Point(start)):
-                    exit()
-                p = p.union(Point(start))
-                add_box(start, "red" if special else "green", 0.5 if special else 0.2)
-
-                for _ in range(5):
-                    middle = rng.integers(0, width, 2)
-                    linepoint = add_line(start, middle)
-                    if linepoint is not None:
-                        break
-                else:
-                    exit()
-                # add some end point
-                for _ in range(2):
-                    for _ in range(5):
-                        end = rng.integers(0, width, 2)
-                        linepoint = add_line(middle, end)
-                        if linepoint is not None:
-                            add_box(end, "gray")
-                            target.append((end + 1) / (width + 2) * 100)
-                            break
-                    else:
-                        exit()
-                return start, target
-            fig = go.Figure(layout=layout)
-            l = MultiLineString()
-            p = MultiPoint()
-            start, target = draw(rng, True)
-            draw(rng, False)
-            # draw(rng, False)
-            # draw(rng, False)
-
-            image_bytes = fig.to_image(format="jpg")
-            image_np = np.array(Image.open(io.BytesIO(image_bytes)))
-            return (image_np, np.array((start + 1) / (width + 2) * 100), np.array(target)), np.array(target)
-        while True:
-            try:
-                img, target = create_img_v2(rng)
-                return img, target
-            except StopExecution:
-                pass
-
-
 if __name__ == "__main__":
-    pass
+    # Datasetbehaviour.RESET = True
+    Datasetbehaviour.MP = True
+    # dataset_guise = SchematicleLineDataset(3, line_num=2, endpoint_num=6,
+    #                                        width=40, image_width=400, padding=2)
+    # plot_images([d[0][0] for d in dataset_guise[:]], -1)
+    d = DoubleLineFormalDataset_img(1, total_output=2, line_num=2)
+    ipyplot.plot_images([x[0] for x in d], img_width=200, max_images=10)
+    ipyplot.plot_images([x[1] for x in d], img_width=200, max_images=10)
     # plot_images(MessyDataset(5), 200)
     # plot_images(GroundTruthDataset(10), 200)
     # plot_images(TestDataset(3), 150)

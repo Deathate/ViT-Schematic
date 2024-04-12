@@ -16,27 +16,27 @@ class DoubleLineFormalDataset(Datasetbehaviour):
         def create_img_v2(rng):
             def corrupt(start, end):
                 end = Point(end)
-                if point_set.contains(end):
+                if p.contains(end):
                     return True
-                if not line_set.intersection(end).is_empty:
+                if not l.intersection(end).is_empty:
                     return True
                 line = LineString([start, end])
-                intersection = point_set.intersection(line)
+                intersection = p.intersection(line)
                 if not intersection.is_empty and intersection != start:
                     return True
-                intersection = line_set.intersection(line)
+                intersection = l.intersection(line)
                 if intersection.length > 0:
                     return True
                 return False
 
             def add_line(start, end):
-                nonlocal line_set, point_set
+                nonlocal l, p
                 start, end = Point(start), Point(end)
                 if start.x == end.x or start.y == end.y:
                     if corrupt(start, end):
                         return None
-                    line_set = line_set.union(LineString([start, end]))
-                    point_set = point_set.union(Point(end))
+                    l = l.union(LineString([start, end]))
+                    p = p.union(Point(end))
                     fig.add_shape(type="line",
                                   x0=start.x, y0=start.y, x1=end.x, y1=end.y,
                                   line=dict(color="black", width=2)
@@ -81,11 +81,12 @@ class DoubleLineFormalDataset(Datasetbehaviour):
                 )
 
             def draw(rng, special):
-                nonlocal line_set, point_set
+                nonlocal l, p
+                target = []
                 start = rng.integers(0, width, 2)
-                if point_set.contains(Point(start)) or line_set.contains(Point(start)):
+                if p.contains(Point(start)) or l.contains(Point(start)):
                     exit()
-                point_set = point_set.union(Point(start))
+                p = p.union(Point(start))
                 add_box(start, "grey")
 
                 endpoint_num = total_output
@@ -103,7 +104,6 @@ class DoubleLineFormalDataset(Datasetbehaviour):
                     if linepoint2 is None:
                         exit()
                 # add some end point
-                target = []
                 for _ in range(min(endpoint_num, 3)):
                     for _ in range(5):
                         end = rng.integers(0, width, 2)
@@ -131,7 +131,7 @@ class DoubleLineFormalDataset(Datasetbehaviour):
                 target = np.array(target)
                 middle = np.array(middle)
                 return start, target, middle
-
+            target_all = []
             layout = go.Layout(
                 xaxis=dict(
                     showline=False,
@@ -154,21 +154,33 @@ class DoubleLineFormalDataset(Datasetbehaviour):
                 margin=dict(l=0, r=0, b=0, t=0, pad=0),
             )
             fig = go.Figure(layout=layout)
-            line_set = MultiLineString()
-            point_set = MultiPoint()
+            l = MultiLineString()
+            p = MultiPoint()
             start, target, middle = draw(rng, True)
 
             add_box(start, "red", .5)
             starting_point = np.array((start + 1) / (width + 2) * 100)
             middle_point = np.array((middle + 1) / (width + 2) * 100)
             ending_point = np.array((target + 1) / (width + 2) * 100)
-            fig_clean = copy.deepcopy(fig)
+
+            for t in target:
+                target_all.append(t)
+
+            target_padding = np.full((total_output, 2), -1, dtype=np.float32)
+            target_padding[:len(target)] = np.array(target)
 
             for _ in range(line_num - 1):
-                start, _, _ = draw(rng, False)
+                _, target, _ = draw(rng, False)
                 # add_box(start, "red", .5)
+                target_all.append(start)
+                for t in target:
+                    target_all.append(t)
 
-            return plotly_to_array(fig), (plotly_to_array(fig_clean), starting_point, middle_point)
+            image_bytes = fig.to_image(format="jpg")
+            image_np = np.array(Image.open(io.BytesIO(image_bytes)))
+            target_all = np.array(target_all)
+
+            return image_np, (starting_point, middle_point)
 
         rng = np.random.default_rng()
         while True:
@@ -179,10 +191,10 @@ class DoubleLineFormalDataset(Datasetbehaviour):
                 pass
 
 
+Datasetbehaviour.reset()
 Datasetbehaviour.MP = True
-dataset_guise = DoubleLineFormalDataset(20000, total_output=1, line_num=2)
+dataset_guise = DoubleLineFormalDataset(40000, total_output=1, line_num=2)
 plot_images([d[0] for d in dataset_guise[:]], -1)
-# plot_images([d[1][0] for d in dataset_guise[:]], -1)
 dataset_guise.view()
 # %%
 
@@ -198,20 +210,12 @@ def transform(x):
     return image_process(x)
 
 
-def ytransform_first(x):
-    return image_process(x[0])
-
-
-def ytransform_second(x):
-    return torch.tensor([x[1]]).float()
-
-
-def ytransform_all(x):
-    return torch.tensor(x).float()
+def ytransform(x):
+    return torch.tensor(x[0]).float()
 
 
 model = Model("FindMiddlePoint", dataset_guise, 256,
-              xtransform=transform, ytransform=ytransform_second, amp=False, cudnn=True)
+              xtransform=transform, ytransform=ytransform, amp=False, cudnn=True)
 model.view()
 # %%
 
@@ -240,18 +244,13 @@ class ViT_ex(nn.Module):
 
         self.transformer = Transformer(
             dim, depth, heads, dim_head, mlp_dim, dropout=dropout)
-        self.decoder = nn.TransformerDecoderLayer(
-            dim, heads, dim_head, batch_first=True, dropout=dropout)
+        self.decoder = nn.TransformerDecoder(nn.TransformerDecoderLayer(
+            dim, heads, dim_head, batch_first=True, dropout=dropout), depth)
         self.decoder_query = nn.Embedding(result_num, dim)
 
         self.mlp = nn.Sequential(
-            nn.Linear(dim, 2),
-            nn.ReLU()
-        )
-        self.op = nn.Linear(1, 20)
-        self.label_query = nn.Sequential(
-            nn.Linear(1, dim),
-            nn.LayerNorm(dim),
+            nn.Linear(dim, result_num * 2),
+            nn.Sigmoid()
         )
 
     def forward(self, x, y):
@@ -262,135 +261,43 @@ class ViT_ex(nn.Module):
             x = torch.cat((cls_tokens, x), dim=1)
             x += self.pos_embedding(x)
             x = self.transformer(x)
-            x = x[:, :1]
+            x = x[:, 0]
             x = self.mlp(x)
-
         elif self.style == "decoder":
             x += self.pos_embedding(x)
             x = self.transformer(x)
             tgt = repeat(self.decoder_query.weight, 'd e -> n d e', n=x.shape[0])
             x = self.decoder(tgt, x)
             x = self.mlp(x)
-
+            x = x.reshape(-1, 2)
         elif self.style == "decoder_only":
-            # xpos = y[:, :, :1]
-            # xpos = self.label_query(xpos)
             x += self.pos_embedding(x)
-            # x = torch.cat((x, xpos), dim=1)
-
             tgt = repeat(self.decoder_query.weight, 'd e -> n d e', n=x.shape[0])
             x = self.decoder(tgt, x)
             x = self.mlp(x)
-            # print(x.shape)
-            # exit()
-
-        # print(x.shape)
-        # exit()
-        return x
-
-
-def convrelu(in_channels, out_channels, kernel, padding):
-    return nn.Sequential(
-        nn.Conv2d(in_channels, out_channels, kernel, padding=padding),
-        nn.ReLU(inplace=True),
-    )
-
-
-class ResNetUNet(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-        self.base_model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
-        self.base_layers = list(self.base_model.children())
-
-        self.layer0 = nn.Sequential(*self.base_layers[:3])  # size=(N, 64, x.H/2, x.W/2)
-        self.layer0_1x1 = convrelu(64, 64, 1, 0)
-        self.layer1 = nn.Sequential(*self.base_layers[3:5])  # size=(N, 64, x.H/4, x.W/4)
-        self.layer1_1x1 = convrelu(64, 64, 1, 0)
-        self.layer2 = self.base_layers[5]  # size=(N, 128, x.H/8, x.W/8)
-        self.layer2_1x1 = convrelu(128, 128, 1, 0)
-        self.layer3 = self.base_layers[6]  # size=(N, 256, x.H/16, x.W/16)
-        self.layer3_1x1 = convrelu(256, 256, 1, 0)
-        self.layer4 = self.base_layers[7]  # size=(N, 512, x.H/32, x.W/32)
-        self.layer4_1x1 = convrelu(512, 512, 1, 0)
-
-        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-
-        self.conv_up3 = convrelu(256 + 512, 512, 3, 1)
-        self.conv_up2 = convrelu(128 + 512, 256, 3, 1)
-        self.conv_up1 = convrelu(64 + 256, 256, 3, 1)
-        self.conv_up0 = convrelu(64 + 256, 128, 3, 1)
-
-        self.conv_original_size0 = convrelu(3, 64, 3, 1)
-        self.conv_original_size1 = convrelu(64, 64, 3, 1)
-        self.conv_original_size2 = convrelu(64 + 128, 64, 3, 1)
-
-        # self.conv_last = nn.Conv2d(64, n_class, 1)
-
-    def forward(self, input):
-        print(input.shape)
-        exit()
-        x_original = self.conv_original_size0(input)
-        x_original = self.conv_original_size1(x_original)
-
-        layer0 = self.layer0(input)
-        layer1 = self.layer1(layer0)
-        layer2 = self.layer2(layer1)
-        layer3 = self.layer3(layer2)
-        layer4 = self.layer4(layer3)
-
-        layer4 = self.layer4_1x1(layer4)
-        x = self.upsample(layer4)
-
-        layer3 = self.layer3_1x1(layer3)
-        x = torch.cat([x, layer3], dim=1)
-        x = self.conv_up3(x)
-
-        x = self.upsample(x)
-        layer2 = self.layer2_1x1(layer2)
-        x = torch.cat([x, layer2], dim=1)
-        x = self.conv_up2(x)
-
-        x = self.upsample(x)
-        layer1 = self.layer1_1x1(layer1)
-        x = torch.cat([x, layer1], dim=1)
-        x = self.conv_up1(x)
-
-        x = self.upsample(x)
-        layer0 = self.layer0_1x1(layer0)
-        x = torch.cat([x, layer0], dim=1)
-        x = self.conv_up0(x)
-
-        x = self.upsample(x)
-        x = torch.cat([x, x_original], dim=1)
-        x = self.conv_original_size2(x)
-
-        # out = self.conv_last(x)
-
-        return x
+            x = x.reshape(-1, 2)
+        return x * 100
 
 
 get_local.deactivate()
-style = "decoder_only"
-patch_size = 10
-dim = int(patch_size**2 * 0.5)
-m = ViT_ex(image_size=200, patch_size=patch_size, dim=dim, depth=1,
-           heads=1, mlp_dim=32, channels=1, dim_head=32, dropout=0, result_num=1, style=style)
-# unet = ResNetUNet().cuda()
-# unet(model[0][0])
+style = "decoder"
+m = ViT_ex(image_size=200, patch_size=10, dim=32, depth=2,
+           heads=4, mlp_dim=32, channels=1, dim_head=32, dropout=0, result_num=1, style=style)
+
 model.suffix = "_" + style
 model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-3),
           2000)
 # %%
 get_local.activate()
+Datasetbehaviour.reset()
 Datasetbehaviour.RESET = True
 dataset_test = DoubleLineFormalDataset(1, total_output=1, line_num=2)
 dataset_test.view()
+plot_images([d[0] for d in dataset_test[:]], -1)
 result = model.inference(dataset_test, verbose=True)
-image = dataset_test[0][0].copy()
-point = result[1][0][0]
-print(point)
-point = point.numpy() * 2
+pprint(result)
+image = dataset_test[0][0]
+point = result[1][0] * 2
 point[1] = 200 - point[1]
 pad = 7
 cv.rectangle(image, (int(point[0]) - pad, int(point[1]) - pad),
@@ -399,8 +306,9 @@ plot_images([image], -1)
 
 # pprint(result)
 
-# plot_images(get_local.cache["Attention.forward"][0][0][0][0][:400].reshape(20, 20))
-
+# plot_images(get_local.cache["Attention.forward"][0][0][0][0].reshape(20, 20) * 1000)
+# print(get_local.cache["Attention.forward"][0][0][0][0][:400].reshape(20, 20))
+# print(model.inference(model[:1]))
 # %%
 # test_data = SchematicleGroundTruth(400, 10)
 # result = model.inference(test_data[:1])
