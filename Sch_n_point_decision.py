@@ -1,6 +1,5 @@
 
 # %%
-# %%
 from Model import *
 from visualizer import get_local
 from vit import Transformer
@@ -156,19 +155,23 @@ class DoubleLineFormalDataset(Datasetbehaviour):
             fig = go.Figure(layout=layout)
             line_set = MultiLineString()
             point_set = MultiPoint()
+            start_all = []
             start, target, middle = draw(rng, True)
-
+            start_all.append(start)
             add_box(start, "red", .5)
-            starting_point = np.array((start + 1) / (width + 2) * 100)
             middle_point = np.array((middle + 1) / (width + 2) * 100)
             ending_point = np.array((target + 1) / (width + 2) * 100)
             fig_clean = copy.deepcopy(fig)
 
             for _ in range(line_num - 1):
                 start, _, _ = draw(rng, False)
-                # add_box(start, "red", .5)
-
-            return plotly_to_array(fig), (plotly_to_array(fig_clean), starting_point, middle_point)
+                add_box(start, "red", .5)
+                start_all.append(start)
+            start_all = np.array(start_all)
+            start_all = np.array((start_all + 1) / (width + 2) * 100)
+            starting_point = start_all[0]
+            np.random.shuffle(start_all)
+            return (plotly_to_array(fig), start_all, starting_point[0]), (plotly_to_array(fig_clean), starting_point, middle_point)
 
         rng = np.random.default_rng()
         while True:
@@ -180,8 +183,9 @@ class DoubleLineFormalDataset(Datasetbehaviour):
 
 
 Datasetbehaviour.MP = True
-dataset_guise = DoubleLineFormalDataset(20000, total_output=1, line_num=2)
-plot_images([d[0] for d in dataset_guise[:]], -1)
+# Datasetbehaviour.RESET = True
+dataset_guise = DoubleLineFormalDataset(10000, total_output=1, line_num=2)
+# plot_images([d[0][0] for d in dataset_guise[:]], -1)
 # plot_images([d[1][0] for d in dataset_guise[:]], -1)
 dataset_guise.view()
 # %%
@@ -194,8 +198,8 @@ image_process = transforms.Compose([
 ])
 
 
-def transform(x):
-    return image_process(x)
+def xtransform(x):
+    return torch.tensor(x[1]).float().cuda(), torch.tensor([x[2]]).float().cuda()
 
 
 def ytransform_first(x):
@@ -203,7 +207,7 @@ def ytransform_first(x):
 
 
 def ytransform_second(x):
-    return torch.tensor([x[1]]).float()
+    return torch.tensor([x[1]]).float().cuda()
 
 
 def ytransform_all(x):
@@ -211,7 +215,7 @@ def ytransform_all(x):
 
 
 model = Model("FindMiddlePoint", dataset_guise, 256,
-              xtransform=transform, ytransform=ytransform_second, amp=False, cudnn=True)
+              xtransform=xtransform, ytransform=ytransform_second, amp=False, cudnn=True)
 model.view()
 # %%
 
@@ -219,198 +223,30 @@ model.view()
 class ViT_ex(nn.Module):
     def __init__(self, image_size, patch_size, dim, depth, heads, mlp_dim, result_num, dropout=0, channels=3, dim_head=64, style="decoder"):
         super().__init__()
-        self.style = style
-        image_height, image_width = image_size, image_size
-        patch_height, patch_width = patch_size, patch_size
-
-        assert image_height % patch_height == 0 and image_width % patch_width == 0, 'Image dimensions must be divisible by the patch size.'
-
-        patch_dim = channels * patch_height * patch_width
-
-        self.cls_token = nn.Parameter(torch.randn(1, 1, dim))
-        self.to_patch_embedding = nn.Sequential(
-            Rearrange('b c (h p1) (w p2) -> b (h w) (p1 p2 c)',
-                      p1=patch_height, p2=patch_width),
-            nn.LayerNorm(patch_dim),
-            nn.Linear(patch_dim, dim),
-            nn.LayerNorm(dim),
-        )
-
-        self.pos_embedding = PositionalEncoding(dim)
-
-        self.transformer = Transformer(
-            dim, depth, heads, dim_head, mlp_dim, dropout=dropout)
-        self.decoder = nn.TransformerDecoderLayer(
-            dim, heads, dim_head, batch_first=True, dropout=dropout)
-        self.decoder_query = nn.Embedding(result_num, dim)
-
-        self.mlp = nn.Sequential(
-            nn.Linear(dim, 2),
-            nn.ReLU()
-        )
-        self.op = nn.Linear(1, 20)
-        self.label_query = nn.Sequential(
-            nn.Linear(1, dim),
-            nn.LayerNorm(dim),
+        self.selector = nn.Sequential(
+            nn.Linear(5, 2, bias=False),
+            nn.ReLU(),
         )
 
     def forward(self, x, y):
-        x = self.to_patch_embedding(x)
-
-        if self.style == "encoder":
-            cls_tokens = repeat(self.cls_token, '1 1 d -> b 1 d', b=x.shape[0])
-            x = torch.cat((cls_tokens, x), dim=1)
-            x += self.pos_embedding(x)
-            x = self.transformer(x)
-            x = x[:, :1]
-            x = self.mlp(x)
-
-        elif self.style == "decoder":
-            x += self.pos_embedding(x)
-            x = self.transformer(x)
-            tgt = repeat(self.decoder_query.weight, 'd e -> n d e', n=x.shape[0])
-            x = self.decoder(tgt, x)
-            x = self.mlp(x)
-
-        elif self.style == "decoder_only":
-            # xpos = y[:, :, :1]
-            # xpos = self.label_query(xpos)
-            x += self.pos_embedding(x)
-            # x = torch.cat((x, xpos), dim=1)
-
-            tgt = repeat(self.decoder_query.weight, 'd e -> n d e', n=x.shape[0])
-            x = self.decoder(tgt, x)
-            x = self.mlp(x)
-            # print(x.shape)
-            # exit()
-
-        # print(x.shape)
-        # exit()
+        candidate = x[0].flatten(1)
+        label = x[1]
+        x = torch.cat([candidate, label], dim=1)
+        x = self.selector(x)
+        x = x.reshape(-1, 1, 2)
         return x
 
 
-def convrelu(in_channels, out_channels, kernel, padding):
-    return nn.Sequential(
-        nn.Conv2d(in_channels, out_channels, kernel, padding=padding),
-        nn.ReLU(inplace=True),
-    )
-
-
-class ResNetUNet(nn.Module):
-    def __init__(self):
-        super().__init__()
-
-        self.base_model = models.resnet18(weights=models.ResNet18_Weights.DEFAULT)
-        self.base_layers = list(self.base_model.children())
-
-        self.layer0 = nn.Sequential(*self.base_layers[:3])  # size=(N, 64, x.H/2, x.W/2)
-        self.layer0_1x1 = convrelu(64, 64, 1, 0)
-        self.layer1 = nn.Sequential(*self.base_layers[3:5])  # size=(N, 64, x.H/4, x.W/4)
-        self.layer1_1x1 = convrelu(64, 64, 1, 0)
-        self.layer2 = self.base_layers[5]  # size=(N, 128, x.H/8, x.W/8)
-        self.layer2_1x1 = convrelu(128, 128, 1, 0)
-        self.layer3 = self.base_layers[6]  # size=(N, 256, x.H/16, x.W/16)
-        self.layer3_1x1 = convrelu(256, 256, 1, 0)
-        self.layer4 = self.base_layers[7]  # size=(N, 512, x.H/32, x.W/32)
-        self.layer4_1x1 = convrelu(512, 512, 1, 0)
-
-        self.upsample = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-
-        self.conv_up3 = convrelu(256 + 512, 512, 3, 1)
-        self.conv_up2 = convrelu(128 + 512, 256, 3, 1)
-        self.conv_up1 = convrelu(64 + 256, 256, 3, 1)
-        self.conv_up0 = convrelu(64 + 256, 128, 3, 1)
-
-        self.conv_original_size0 = convrelu(3, 64, 3, 1)
-        self.conv_original_size1 = convrelu(64, 64, 3, 1)
-        self.conv_original_size2 = convrelu(64 + 128, 64, 3, 1)
-
-        # self.conv_last = nn.Conv2d(64, n_class, 1)
-
-    def forward(self, input):
-        print(input.shape)
-        exit()
-        x_original = self.conv_original_size0(input)
-        x_original = self.conv_original_size1(x_original)
-
-        layer0 = self.layer0(input)
-        layer1 = self.layer1(layer0)
-        layer2 = self.layer2(layer1)
-        layer3 = self.layer3(layer2)
-        layer4 = self.layer4(layer3)
-
-        layer4 = self.layer4_1x1(layer4)
-        x = self.upsample(layer4)
-
-        layer3 = self.layer3_1x1(layer3)
-        x = torch.cat([x, layer3], dim=1)
-        x = self.conv_up3(x)
-
-        x = self.upsample(x)
-        layer2 = self.layer2_1x1(layer2)
-        x = torch.cat([x, layer2], dim=1)
-        x = self.conv_up2(x)
-
-        x = self.upsample(x)
-        layer1 = self.layer1_1x1(layer1)
-        x = torch.cat([x, layer1], dim=1)
-        x = self.conv_up1(x)
-
-        x = self.upsample(x)
-        layer0 = self.layer0_1x1(layer0)
-        x = torch.cat([x, layer0], dim=1)
-        x = self.conv_up0(x)
-
-        x = self.upsample(x)
-        x = torch.cat([x, x_original], dim=1)
-        x = self.conv_original_size2(x)
-
-        # out = self.conv_last(x)
-
-        return x
-
-
-get_local.deactivate()
-style = "decoder_only"
-patch_size = 10
+style = "decoder"
+patch_size = 20
 dim = int(patch_size**2 * 0.5)
 m = ViT_ex(image_size=200, patch_size=patch_size, dim=dim, depth=1,
-           heads=1, mlp_dim=32, channels=1, dim_head=32, dropout=0, result_num=1, style=style)
-# unet = ResNetUNet().cuda()
-# unet(model[0][0])
+           heads=2, mlp_dim=32, channels=1, dim_head=32, dropout=0, result_num=1, style=style)
 model.suffix = "_" + style
 model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-3),
           2000)
 # %%
-get_local.activate()
 Datasetbehaviour.RESET = True
-dataset_test = DoubleLineFormalDataset(1, total_output=1, line_num=2)
-dataset_test.view()
-result = model.inference(dataset_test, verbose=True)
-image = dataset_test[0][0].copy()
-point = result[1][0][0]
-print(point)
-point = point.numpy() * 2
-point[1] = 200 - point[1]
-pad = 7
-cv.rectangle(image, (int(point[0]) - pad, int(point[1]) - pad),
-             (int(point[0]) + pad, int(point[1]) + pad), (0, 255, 0), 2)
-plot_images([image], -1)
-
-# pprint(result)
-
-# plot_images(get_local.cache["Attention.forward"][0][0][0][0][:400].reshape(20, 20))
-
-# %%
-# test_data = SchematicleGroundTruth(400, 10)
-# result = model.inference(test_data[:1])
-# test_data = SchematicleLineDataset(10000, line_num=2, endpoint_num=6,
-#                                    width=40, image_width=400, padding=2)
-# result = model.inference(test_data[:])
-# a, b, c = result
-# print(b)
-# print(c)
-# plot_images(result[])
-
-# model.inference(dataset_guise[0], True)
-# model.preprocessing(test_data[:1], False)
+dataset_test = DoubleLineFormalDataset(2, total_output=1, line_num=2)
+result = model.inference(dataset_test)
+pprint(result[0])

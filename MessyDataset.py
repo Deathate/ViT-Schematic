@@ -1,12 +1,9 @@
-import random
-from pathlib import Path
-
-import cv2 as cv2
-import numpy as np
+# %%
+from Model import *
 
 
-class MessyDataset():
-    def __init__(self):
+class MessyDataset(Datasetbehaviour):
+    def __init__(self, size):
         self.postive = [
             cv2.imread(str(x), cv2.IMREAD_UNCHANGED)
             for x in list(Path("data_cleaning_example/positive").glob("*/*.png"))
@@ -15,8 +12,9 @@ class MessyDataset():
             cv2.imread(str(x), cv2.IMREAD_UNCHANGED)
             for x in list(Path("data_cleaning_example/negative").glob("*/*png"))
         ]
+        super().__init__(size, self.__create)
 
-    def create(self):
+    def __create(self):
         rng = np.random.default_rng()
 
         def add_line(img, start_point, end_point):
@@ -160,9 +158,15 @@ class MessyDataset():
             add_dottedline(img, start, end)
         for _ in range(10):
             add_random_image(img, self.negative, [0.8, 1.2])
+        img = cv.resize(img, (200, 200))
+        img2 = cv.resize(img2, (200, 200))
         img = cv2.cvtColor(img, cv2.COLOR_RGBA2RGB)
         img2 = cv2.cvtColor(img2, cv2.COLOR_RGBA2RGB)
         return img, img2
 
 
-m = MessyDataset().create()
+if __name__ == "__main__":
+    Datasetbehaviour.MP = True
+    # Datasetbehaviour.RESET = True
+    ds = MessyDataset(35000)
+    plot_images(ds)

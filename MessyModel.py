@@ -1,19 +1,26 @@
 # %%
-from createdata import GroundTruthDataset, MessyDataset, TestDataset
+# %%
+
+from createdata import TestDataset
+from MessyDataset import MessyDataset
 from Model import *
 
 width = 200
-d = MessyDataset(20000)
-d.MP = True
+# Datasetbehaviour.RESET = True
+ds = MessyDataset(35000)
+plot_images(ds)
+
 # %%
-transform = transforms.Compose(
-    [
-        transforms.ToImage(),
-        transforms.Grayscale(),
-        transforms.Resize((width, width)),
-        transforms.ToDtype(torch.float32, scale=True),
-    ]
-)
+
+
+xtransform = transforms.Compose([
+    transforms.ToImage(),
+    transforms.Grayscale(),
+    transforms.Resize((width, width)),
+    transforms.ToDtype(torch.float32, scale=True),
+])
+
+
 ytransform = transforms.Compose(
     [
         transforms.ToImage(),
@@ -21,14 +28,12 @@ ytransform = transforms.Compose(
         transforms.Resize((width, width)),
         # ThresholdTransform(150),
         transforms.ToDtype(torch.float32, scale=True),
-    ]
-)
-model = Model("autoencoder", data=d, transform=transform,
-              ytransform=ytransform, batch_size=256, shuffle=True)
-plot_images(model, 200, max_images=2)
-# %%
-d3 = TestDataset(3)
-plot_images(d3)
+    ])
+
+
+model = Model("autoencoder", ds, 512, xtransform, ytransform, shuffle=False, use_cache=False)
+# plot_images(model, 200, max_images=2)
+
 # %%
 
 
@@ -115,7 +120,6 @@ class TransformerAutoencoder(nn.Module):
 
     def forward(self, x, target):
         x = self.to_patch_embedding(x)
-        # target = self.to_patch_embedding(target)
         x += self.pos_embedding(x)
         x = self.encoder(x)
         # tgt = self.tgt + self.pos_embedding(self.tgt)
@@ -131,11 +135,10 @@ m = TransformerAutoencoder(
     width, patch_size=10, dim=50, heads=1, mlp_dim=80, dropout=0, channels=1
 )
 
-model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-2), epochs=1000)
-model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-3), epochs=1000)
-# model.fit(m, nn.MSELoss(), optim.Adam(m.parameters(), lr=1e-4), epochs=200, amp=False)
-# model.fit(m, nn.MSELoss(), optim.SGD(m.parameters(), lr=1e-4), epochs=2000)
+model.fit(m, nn.MSELoss(), optim.Adam(m.parameters(), lr=1e-3), epochs=1000)
+
 # %%
+
 result = model.inference(MessyDataset(10))
 plot_images(result, img_width=200, max_images=10)
 result = model.inference(TestDataset(3))
