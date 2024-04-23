@@ -3,3 +3,4 @@ preprocessed_datasets/
 data/
 runs/
 __pycache__/
+.*
