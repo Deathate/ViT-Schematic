@@ -29,7 +29,7 @@ ytransform = transforms.Compose(
 
 
 model = Model("autoencoder", ds, 512, xtransform, ytransform, shuffle=False)
-# plot_images(model, 200, max_images=2)
+plot_images(model, 200, max_images=2)
 
 # %%
 
@@ -121,7 +121,6 @@ class TransformerAutoencoder(nn.Module):
         x = self.encoder(x)
         tgt = repeat(self.tgt, '1 a b -> c a b', c=x.shape[0])
         x = self.decoder(x, tgt)
-
         x = self.to_patch_debedding(x)
         return x
 

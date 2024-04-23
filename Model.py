@@ -700,7 +700,7 @@ def flatten_list(lst):
     for item in lst:
         if isinstance(item, list) or isinstance(item, tuple):
             flattened_list.extend(flatten_list(item))
-        elif item is not None:
+        elif isinstance(item, torch.Tensor) or isinstance(item, np.ndarray):
             flattened_list.append(item)
     return flattened_list
 
