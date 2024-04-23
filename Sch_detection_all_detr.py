@@ -79,7 +79,7 @@ class DoubleLineFormalDataset(Datasetbehaviour):
                     fillcolor=color,
                 )
 
-            def draw(rng, special):
+            def draw(rng):
                 nonlocal line_set, point_set
                 start = rng.integers(0, width, 2)
                 if point_set.contains(Point(start)) or line_set.contains(Point(start)):
@@ -88,8 +88,6 @@ class DoubleLineFormalDataset(Datasetbehaviour):
                 add_box(start, "grey")
 
                 endpoint_num = total_output
-                if not special:
-                    endpoint_num = 1
 
                 middle = rng.integers(0, width, 2)
                 linepoint = add_line(start, middle)
@@ -128,6 +126,8 @@ class DoubleLineFormalDataset(Datasetbehaviour):
                 if endpoint_num > 4:
                     add_point(middle2)
 
+                start = (np.array(start, dtype=np.float32) + 1) / (width + 2)
+                target = (np.array(target, dtype=np.float32) + 1) / (width + 2)
                 return start, target, middle
 
             layout = go.Layout(
@@ -154,48 +154,41 @@ class DoubleLineFormalDataset(Datasetbehaviour):
             fig = go.Figure(layout=layout)
             line_set = MultiLineString()
             point_set = MultiPoint()
-            start_all = []
             target_all = []
-
-            start, target, middle = draw(rng, True)
-            start_all.append(start)
-            target_all.extend(target)
-
-            # add_box(start, "red", .5)
-
-            for _ in range(line_num - 1):
-                start, target, _ = draw(rng, False)
+            G = nx.Graph()
+            for _ in range(line_num):
+                start, target, _ = draw(rng)
                 # add_box(start, "red", .5)
-                start_all.append(start)
-                target_all.extend(target)
+                target_all.append(start)
+                for target_point in target:
+                    target_all.append(target_point)
+                    G.add_edge(start.tobytes(), target_point.tobytes())
 
-            target_all.extend(start_all)
-
+            np.random.shuffle(target_all)
             target_all = np.array(target_all)
-            target_all = np.array((target_all + 1) / (width + 2))
-            target_box_all = []
-            pad = 0.03
-            for target in target_all:
-                target_box_all.append([target[0] - pad, target[1] - pad,
-                                      target[0] + pad, target[1] + pad])
-            target_box_all = np.array(target_box_all)
-            return (plotly_to_array(fig)), (target_box_all, np.ones(len(target_box_all), dtype=int))
+            # target_box_all = []
+            # pad = 0.03
+            # for target in target_all:
+            #     target_box_all.append([target[0] - pad, target[1] - pad,
+            #                           target[0] + pad, target[1] + pad])
+            # target_box_all = np.array(target_box_all)
+            return (plotly_to_array(fig)), (target_all), (G, nx.complement(G))
 
         rng = np.random.default_rng()
         while True:
             try:
-                img, target = create_img_v2(rng)
-                return img, target
+                img, target, meta = create_img_v2(rng)
+                return img, target, meta
             except StopExecution:
                 pass
 
 
 Datasetbehaviour.MP = True
 # Datasetbehaviour.RESET = True
-dataset_guise = DoubleLineFormalDataset(10000, total_output=1, line_num=2)
-
-plot_images(draw_bounding_boxes(dataset_guise[0][0], dataset_guise[0][1][0]))
-dataset_guise.view()
+dataset_guise = DoubleLineFormalDataset(100, total_output=1, line_num=2)
+dataset_guise[0]
+# plot_images(draw_point(dataset_guise[0][0], dataset_guise[0][1]))
+# dataset_guise.view()
 # %%
 
 xtransform = transforms.Compose([
@@ -207,76 +200,13 @@ xtransform = transforms.Compose([
 
 
 def ytransform(x):
-    return torch.tensor(x[0], dtype=torch.float32), torch.tensor(x[1], dtype=torch.int64)
+    return torch.tensor(x).float()
 
 
-model = Model("FindPoints", dataset_guise, 30,
-              xtransform=xtransform, ytransform=ytransform, amp=True, cudnn=True, cudalize=True)
+model = Model("FindPoints", dataset_guise, 256,
+              xtransform=xtransform, ytransform=ytransform, amp=False, cudnn=False)
 model.view()
-# %%
-from torchvision.models.detection import (
-    FasterRCNN_ResNet50_FPN_V2_Weights,
-    faster_rcnn,
-    fasterrcnn_resnet50_fpn_v2,
-)
-from torchvision.utils import draw_bounding_boxes
 
-
-class ObjectDetectionModel(nn.Module):
-    def __init__(self, num_classes):
-        super().__init__()
-        weights = FasterRCNN_ResNet50_FPN_V2_Weights.DEFAULT
-        self.backbone = fasterrcnn_resnet50_fpn_v2(weights=weights, box_score_thresh=0.9)
-        self.backbone.roi_heads.box_predictor = faster_rcnn.FastRCNNPredictor(1024, num_classes)
-        print(self.backbone)
-        exit()
-
-    def forward(self, x, y):
-        targets, classes = y
-        # print(x)
-        # print(y)
-        targets = [{"boxes": t, "labels": c} for t, c in zip(targets, classes)]
-
-        # loss = self.backbone(x, targets)
-        result = self.backbone(x, targets)
-        # print(x.shape, classes.shape)
-        # print(result)
-        return result
-
-
-def criterion(outputs, targets):
-    # return outputs["loss_box_reg"] + outputs["loss_classifier"]
-    # print(outputs)
-    # exit()
-    # print(targets)
-    # exit()
-    return sum(loss for loss in outputs.values())
-
-
-def training_epoch_end():
-    ts = DoubleLineFormalDataset(1, total_output=1, line_num=2)
-    print(model.inference(ts, verbose=False))
-    exit()
-
-
-m = ObjectDetectionModel(4)
-model.fit(m, criterion, optim.Adam(m.parameters(), lr=1e-3),
-          100, training_epoch_end=training_epoch_end)
-# %%
-# img = Image.open("grace_hopper_517x606.jpg")
-# weights = FasterRCNN_ResNet50_FPN_V2_Weights.DEFAULT
-# model = fasterrcnn_resnet50_fpn_v2(weights=weights, box_score_thresh=0.9)
-# model.eval()
-# preprocess = weights.transforms()
-# batch = [preprocess(img)]
-# prediction = model(batch)[0]
-# labels = [weights.meta["categories"][i] for i in prediction["labels"]]
-# transform = transforms.Compose([transforms.ToImage(), transforms.ToDtype(torch.uint8)])
-# box = draw_bounding_boxes(transform(img), boxes=prediction["boxes"],
-#                           labels=labels,
-#                           colors="red",
-#                           width=4)
-# plot_images(box, -1)
 # %%
 # from torchmetrics.detection import CompleteIntersectionOverUnion
 
@@ -302,95 +232,8 @@ model.fit(m, criterion, optim.Adam(m.parameters(), lr=1e-3),
 # print(x)
 # exit()
 
+
 # %%
-
-
-# def transform(x):
-#     image_process = transforms.Compose([
-#         transforms.ToImage(),
-#         transforms.Grayscale(),
-#         transforms.ToDtype(torch.float32, scale=True),
-#     ])
-#     return image_process(x)
-
-
-# def ytransform_second(x):
-#     image_process = transforms.Compose([
-#         transforms.ToImage(),
-#         transforms.Grayscale(),
-#         transforms.ToDtype(torch.float32, scale=True),
-#     ])
-#     return image_process(x[0])
-
-
-# model = Model("FindMiddlePoint", dataset_guise, 512,
-#               xtransform=transform, ytransform=ytransform_second, amp=True, cudnn=True)
-# model.view()
-# class TransformerAutoencoder(nn.Module):
-#     def __init__(self, image_size, patch_size, dim, heads, mlp_dim, dropout=0, channels=3):
-#         super().__init__()
-#         image_height, image_width = image_size, image_size
-#         patch_height, patch_width = patch_size, patch_size
-
-#         assert (
-#             image_height % patch_height == 0 and image_width % patch_width == 0
-#         ), "Image dimensions must be divisible by the patch size."
-
-#         patch_dim = channels * patch_height * patch_width
-
-#         self.to_patch_embedding = nn.Sequential(
-#             Rearrange("b c (h p1) (w p2) -> b (h w) (p1 p2 c)", p1=patch_height, p2=patch_width),
-#             nn.LayerNorm(patch_dim),
-#             nn.Linear(patch_dim, dim),
-#             nn.LayerNorm(dim),
-#         )
-#         self.to_patch_debedding = nn.Sequential(
-#             nn.Linear(dim, patch_dim),
-#             nn.Sigmoid(),
-#             # nn.ReLU(),
-#             Rearrange(
-#                 "b (h w) (p1 p2 c) -> b c (h p1) (w p2)",
-#                 p1=patch_height,
-#                 p2=patch_width,
-#                 h=image_height // patch_height,
-#                 w=image_width // patch_width,
-#             ),
-#         )
-
-#         self.pos_embedding = PositionalEncoding(dim)
-
-#         self.encoder = nn.TransformerEncoderLayer(
-#             dim, heads, mlp_dim, batch_first=True, dropout=dropout
-#         )
-#         self.decoder = nn.TransformerDecoderLayer(
-#             dim, heads, mlp_dim, batch_first=True, dropout=dropout
-#         )
-#         self.tgt = nn.Parameter(torch.randn(1, patch_dim, dim))
-
-#     def forward(self, x, target):
-#         x = self.to_patch_embedding(x)
-#         x += self.pos_embedding(x)
-#         x = self.encoder(x)
-#         tgt = repeat(self.tgt, '1 a b -> c a b', c=x.shape[0])
-#         x = self.decoder(x, tgt)
-
-#         x = self.to_patch_debedding(x)
-#         return x
-# m = TransformerAutoencoder(
-#     200, patch_size=10, dim=20, heads=1, mlp_dim=32, dropout=0, channels=1
-# )
-# model.fit(m, nn.MSELoss(), optim.Adam(m.parameters(), lr=1e-3),
-#           2000)
-# transform_inv = transforms.Compose([
-#     lambda x: x * 255,
-#     transforms.ToImage(),
-# ])
-# dataset_test = DoubleLineFormalDataset(3, total_output=1, line_num=2)
-# result = model.inference(dataset_test, verbose=False)
-# plot_images([*result.squeeze(1)])
-# model.save("transformer_autoencoder_amp.pth")
-# %%
-
 
 class ViT_ex(nn.Module):
     def __init__(self, image_size, patch_size, dim, depth, heads, mlp_dim, result_num, dropout=0, channels=3, dim_head=64, style="decoder"):
@@ -418,11 +261,17 @@ class ViT_ex(nn.Module):
             dim, depth, heads, dim_head, mlp_dim, dropout=dropout)
         self.decoder = nn.TransformerDecoder(nn.TransformerDecoderLayer(
             dim, heads, dim_head, batch_first=True, dropout=dropout), depth)
-        self.decoder_query = nn.Embedding(result_num, dim)
+        self.decoder_query = nn.Embedding(result_num + 1, dim)
 
-        self.mlp = nn.Sequential(
+        self.box_head = nn.Sequential(
             nn.Linear(dim, 2),
             nn.Sigmoid()
+        )
+        self.relation_head = nn.Sequential(
+            nn.LayerNorm(dim * 3),
+            nn.Linear(dim, dim),
+            nn.LayerNorm(dim),
+            nn.Linear(dim, 1),
         )
         self.op = nn.Linear(1, 20)
         self.label_query = nn.Sequential(
@@ -446,8 +295,8 @@ class ViT_ex(nn.Module):
             x = self.transformer(x)
             tgt = repeat(self.decoder_query.weight, 'd e -> n d e', n=x.shape[0])
             x = self.decoder(tgt, x)
-            x = self.mlp(x)
-            x = x * 100
+            # x = self.mlp(x)
+            # x = self.box_head(x)
 
         elif self.style == "decoder_only":
             # xpos = y[:, :, :1]
@@ -457,12 +306,46 @@ class ViT_ex(nn.Module):
 
             tgt = repeat(self.decoder_query.weight, 'd e -> n d e', n=x.shape[0])
             x = self.decoder(tgt, x)
-            x = self.mlp(x)
-
-        # print(x.shape)
-        # print(y.shape)
-        # exit()
+        # print(y[0])
         return x
+
+
+def criterion(y_hat, y, meta):
+    # loss = complete_box_iou(predicted_box, y2)
+    total_loss = 0
+    predicted_box = meta["model"].box_head(y_hat[:, :4])
+    Hungarian_Order(predicted_box, y)
+    loss_box = F.mse_loss(predicted_box, y)
+    for i, element in enumerate(y):
+        for c1, c2 in itertools.combinations(element, 2):
+            c1n = c1.cpu().detach().numpy()
+            c2n = c2.cpu().detach().numpy()
+            print(c1n, c2n)
+            exit()
+        node = element[0].cpu().detach().numpy().tobytes()
+        # print(node)
+        print(meta["data"][i].meta[0].edges(node))
+    # for
+    exit()
+
+    for y1, y2 in zip(y_hat, y):
+        predicted_box = meta["model"].box_head(y1)
+        # print(predicted_box)
+        print(y2)
+        exit()
+        total_loss = total_loss + F.mse_loss(predicted_box, y2)
+        # loss = 1 - loss
+        # print(predicted_box, y2)
+        # exit()
+        # assignment = linear_sum_assignment(loss.detach().cpu().numpy())
+        # print(y1, y2)
+        # print(loss)
+        # print(assignment)
+        # exit()
+        # assignment_loss = loss[assignment]
+        # total_loss += assignment_loss.mean()
+    total_loss = total_loss / len(y_hat)
+    return total_loss
 
 
 get_local.deactivate()
@@ -472,24 +355,19 @@ dim = int(patch_size**2 * 0.5)
 m = ViT_ex(image_size=100, patch_size=patch_size, dim=dim, depth=1,
            heads=2, mlp_dim=32, channels=1, dim_head=32, dropout=0, result_num=4, style=style)
 model.suffix = "_" + style
-model.fit(m, nn.MSELoss(), optim.AdamW(m.parameters(), lr=1e-3),
-          2000, target_transform=Hungarian_Order)
+model.fit(m, criterion, optim.AdamW(m.parameters(), lr=1e-3),
+          2000)
 # %%
+
 get_local.activate()
 Datasetbehaviour.RESET = True
-dataset_test = DoubleLineFormalDataset(1, total_output=1, line_num=2)
+dataset_test = DoubleLineFormalDataset(5, total_output=1, line_num=2)
 result = model.inference(dataset_test)
 canvas = []
-pad = 5
 for i, d in enumerate(dataset_test):
-    image = dataset_test[i][0].copy()
+    image = dataset_test[i][0]
     answers = result[i][1]
-    answers = answers
-    answers[:, 1] = 100 - answers[:, 1]
-    for answer in answers:
-        print(answer)
-        cv.rectangle(image, (int(answer[0]) - pad, int(answer[1]) - pad),
-                     (int(answer[0]) + pad, int(answer[1]) + pad), (0, 255, 0), 2)
+    image = draw_point(image, answers)
     attention_map = get_local.cache["Attention.forward"][0][i][0][0][:25].reshape(5, 5)
     canvas.append([image, attention_map])
 visualize_attentions(canvas)

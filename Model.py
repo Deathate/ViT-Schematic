@@ -16,7 +16,10 @@ import secrets
 import shutil
 import textwrap
 import time
+import typing
+from dataclasses import dataclass
 from functools import partial
+from inspect import signature
 from itertools import count
 from pathlib import Path
 from pprint import pprint
@@ -29,6 +32,7 @@ import ipyplot
 import IPython
 import IPython.display
 import matplotlib.pyplot as plt
+import networkx as nx
 import numpy as np
 import p_tqdm
 import plotly.express as px
@@ -46,6 +50,7 @@ from einops.layers.torch import Rearrange
 from IPython.display import display
 from PIL import Image, ImageOps
 from plotly.subplots import make_subplots
+from scipy.optimize import linear_sum_assignment
 from shapely import union
 from shapely.geometry import LineString, MultiLineString, MultiPoint, Point
 from sklearn.metrics import accuracy_score, classification_report
@@ -55,6 +60,7 @@ from torch.utils.tensorboard import SummaryWriter
 from torchmetrics import Accuracy
 from torchmetrics.classification import MulticlassAccuracy
 from torchvision import models
+from torchvision.ops.boxes import complete_box_iou
 from tqdm.std import tqdm
 
 from utility import *
@@ -87,6 +93,12 @@ def select_gpu_with_most_free_memory():
 
 
 rng = np.random.default_rng()
+
+
+class DataCell(typing.NamedTuple):
+    input: object
+    output: object
+    meta: dict = None
 
 
 class Datasetbehaviour:
@@ -123,15 +135,15 @@ class Datasetbehaviour:
             if not Datasetbehaviour.MP:
                 dataset = []
                 for _ in tqdm(range(self.size)):
-                    dataset.append(self.creater())
+                    dataset.append(DataCell(*self.creater()))
             else:
 
                 dataset = p_tqdm.p_umap(
-                    lambda _: self.creater(),
+                    lambda _: DataCell(*self.creater()),
                     range(self.size),
                     num_cpus=os.cpu_count() - 4,
                 )
-            self.__dataset = list(map(list, zip(*dataset)))
+            self.__dataset = dataset
             pickle.dump(self.__dataset, open(self.filepath, "wb"))
         print("--- [finish creation] ---\n")
         Datasetbehaviour.reset()
@@ -139,23 +151,13 @@ class Datasetbehaviour:
     def __getitem__(self, idx):
         if self.__dataset is None:
             self.__load()
-        if isinstance(idx, slice):
-            return list(zip(self.__dataset[0][idx], self.__dataset[1][idx]))
-        else:
-            return list(zip(self.__dataset[0][idx:idx + 1], self.__dataset[1][idx:idx + 1]))[0]
 
-    def get(self, idx):
-        if self.__dataset is None:
-            self.__load()
-        if isinstance(idx, slice):
-            return list(zip(self.__dataset[0][idx], self.__dataset[1][idx]))
-        else:
-            return list(zip(self.__dataset[0][idx:idx + 1], self.__dataset[1][idx:idx + 1]))
+        return self.__dataset[idx]
 
     def __len__(self):
         if self.__dataset is None:
             self.__load()
-        return len(self.__dataset[0])
+        return len(self.__dataset)
 
     def save_params(self):
         frame = inspect.currentframe()
@@ -194,6 +196,13 @@ class Datasetbehaviour:
 Datasetbehaviour.reset()
 
 
+def cudalization(x):
+    if isinstance(x, torch.Tensor):
+        return x.cuda(non_blocking=True)
+    else:
+        return [cudalization(y) for y in x]
+
+
 class Model:
     def __init__(
         self,
@@ -202,7 +211,6 @@ class Model:
         batch_size=64,
         xtransform=None,
         ytransform=None,
-        xytransform=None,
         validation_split=0.1,
         shuffle=True,
         amp=True,
@@ -215,7 +223,6 @@ class Model:
         self.name = name
         self.xtransform = xtransform
         self.ytransform = ytransform
-        self.xytransform = xytransform
         self.suffix = suffix
         if self.xtransform is None:
             self.xtransform = lambda x: torch.tensor(x).float().cuda()
@@ -223,13 +230,15 @@ class Model:
             self.ytransform = lambda x: torch.tensor(x).float().cuda()
         select_gpu_with_most_free_memory()
         # torch.set_default_device('cuda')
+        self.cudalize = cudalize
+        self.data = data
         self.dataset = self.preprocessing(data, use_cache, cudalize)
-        train_dataset, test_dataset = torch.utils.data.random_split(
+        self.train_dataset, self.test_dataset = torch.utils.data.random_split(
             self.dataset,
             [tn := int(len(self.dataset) * (1 - validation_split)), len(self.dataset) - tn],
         )
         self.train_loader = DataLoader(
-            dataset=train_dataset,
+            dataset=self.train_dataset,
             batch_size=batch_size,
             shuffle=shuffle,
             # pin_memory=True,
@@ -237,7 +246,7 @@ class Model:
             # persistent_workers=True,
         )
         self.test_loader = DataLoader(
-            dataset=test_dataset,
+            dataset=self.test_dataset,
             batch_size=batch_size,
             # pin_memory=True,
             # num_workers=os.cpu_count(),
@@ -266,7 +275,7 @@ class Model:
 
     def preprocessing(self, data: Datasetbehaviour, use_cache, cudalize):
         print("[data preprocessing]")
-        load_from_cache = use_cache and isinstance(data, Datasetbehaviour) and not data.reset
+        load_from_cache = use_cache and not data.reset
         if load_from_cache:
             transform_id = data.filepath
             try:
@@ -277,10 +286,6 @@ class Model:
                 transform_id += inspect.getsource(self.ytransform)
             except:
                 transform_id += str(self.ytransform)
-            try:
-                transform_id += inspect.getsource(self.xytransform)
-            except:
-                transform_id += str(self.xytransform)
 
             filepath = (
                 Path(data.filepath).parent
@@ -292,32 +297,26 @@ class Model:
             print(textwrap.fill(str(filepath), 70, initial_indent=" " * 4))
             result = pickle.load(open(filepath, "rb"))
         else:
-            if self.xytransform is not None:
-                result = [[*list(self.xytransform(x[0], x[1]))] for x in tqdm(data)]
-            else:
-                try:
-                    if isinstance(data, Datasetbehaviour):
-                        result = [[self.xtransform(x[0]), self.ytransform(x[1])]
-                                  for x in tqdm(data[:])]
-                    else:
-                        result = [[self.xtransform(x[0]), self.ytransform(x[1])]
-                                  for x in tqdm(data)]
-                except Exception as e:
-                    print("Error in transformation")
-                    raise (e)
-                if cudalize and isinstance(result[0][0], torch.Tensor) and isinstance(result[0][1], torch.Tensor):
-                    print("* [cudalized]")
-                    for r in tqdm(result):
-                        r[0] = r[0].cuda(non_blocking=True)
-                        r[1] = r[1].cuda(non_blocking=True)
+            try:
+                result = [[i, self.xtransform(x.input), self.ytransform(x.output)]
+                          for i, x in enumerate(tqdm(data))]
+            except Exception as e:
+                print("Error in transformation")
+                raise (e)
+
             if load_from_cache:
                 filepath.parent.mkdir(parents=True, exist_ok=True)
                 pickle.dump(result, open(filepath, "wb"))
         # result = [[x[0].cuda(non_blocking=True), x[1].cuda(non_blocking=True)] for x in result]
+        if cudalize:
+            print("*cudalized")
+            for r in tqdm(result):
+                r[1] = cudalization(r[1])
+                r[2] = cudalization(r[2])
         print("--- [finish preprocessing] ---\n")
         return result
 
-    def fit(self, model, criterion, optimizer, epochs=1, compile=False, target_transform=lambda y_hat, y: y, early_stopping=True, eval_metrics=None):
+    def fit(self, model, criterion, optimizer, epochs=1, compile=False, target_transform=lambda y_hat, y: y, early_stopping=True, eval_metrics=None, training_epoch_end=None, pretrained_path=""):
         if id(model) != self.model_id:
             self.model_id = id(model)
             self.gc()
@@ -329,6 +328,10 @@ class Model:
             if compile:
                 self.model = torch.compile(self.model, mode="reduce-overhead")
             torch.set_float32_matmul_precision("high")
+            best_quantity = 1e5
+        if pretrained_path:
+            self.model.load_state_dict(torch.load(pretrained_path))
+            return
         if self.interrupt:
             return
         try:
@@ -341,29 +344,9 @@ class Model:
                 scaler = torch.cuda.amp.GradScaler()
             early_stopping_monitor = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=15)
 
-            def train_with_amp():
-                with torch.cuda.amp.autocast():
-                    y_hat = self.model(data, target)
-                    loss = self.loss(y_hat, target, criterion, eval=False,
-                                     target_transform=target_transform, eval_metrics=eval_metrics)
-                optimizer.zero_grad()
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
-                return loss
-
-            def train_without_amp():
-                y_hat = self.model(data, target)
-                loss = self.loss(y_hat, target, criterion, eval=False,
-                                 target_transform=target_transform, eval_metrics=eval_metrics)
-                optimizer.zero_grad()
-                loss.backward()
-                optimizer.step()
-                return loss
-
-            train_func = train_with_amp if self.amp else train_without_amp
+            self.model.train()
+            def create_meta(seq): return {"data": [self.data[s] for s in seq], "model": self.model}
             for ep in range(start, end):
-                self.model.train()
                 with tqdm(
                     total=len(self.train_loader),
                     bar_format="{desc}{n_fmt}/{total_fmt}|{bar}| - {elapsed}s{postfix}",
@@ -372,11 +355,28 @@ class Model:
                     train_loss = []
                     pbar.set_postfix({"loss": "---", "acc": "---"})
 
-                    for data, target in self.train_loader:
-                        data = data.cuda()
-                        target = target.cuda()
-                        try:
-                            loss = train_func()
+                    try:
+                        for seq, data, target in self.train_loader:
+                            if not self.cudalize:
+                                data = cudalization(data)
+                                target = cudalization(target)
+
+                            if self.amp:
+                                with torch.cuda.amp.autocast():
+                                    y_hat = self.model(data, target)
+                                    loss = self.loss(y_hat, target, criterion, eval=False,
+                                                     target_transform=target_transform, eval_metrics=eval_metrics, meta=create_meta(seq))
+                                optimizer.zero_grad()
+                                scaler.scale(loss).backward()
+                                scaler.step(optimizer)
+                                scaler.update()
+                            else:
+                                y_hat = self.model(data, target)
+                                loss = self.loss(y_hat, target, criterion, eval=False,
+                                                 target_transform=target_transform, eval_metrics=eval_metrics, meta=create_meta(seq))
+                                optimizer.zero_grad()
+                                loss.backward()
+                                optimizer.step()
 
                             # if ep == 0:
                             #     from torchviz import make_dot
@@ -388,38 +388,44 @@ class Model:
                             train_loss.append(loss)
                             pbar.set_postfix({"loss": f"{loss:.3E}", "acc": "---"})
                             pbar.update(1)
-                        except Exception as e:
-                            # print("Error in loss calculation", e)
-                            print("!!!-------- Error captured --------!!!")
-                            try:
-                                error = tabulate(
-                                    [
-                                        ["y_hat", y_hat.dtype, list(y_hat.shape)],
-                                        ["target", target.dtype, list(target.shape)],
-                                    ],
-                                    headers=["", "dtype", "shape"],
-                                    tablefmt="psql",
-                                )
-                                print(error)
-                            except:
-                                pass
-                            print("Removing log directory")
-                            shutil.rmtree(self.writer.log_dir)
-                            raise e
+                        if training_epoch_end:
+                            training_epoch_end()
+                    except Exception as e:
+                        # print("Error in loss calculation", e)
+                        print("!!!-------- Error captured --------!!!")
+                        try:
+                            error = tabulate(
+                                [
+                                    ["y_hat", y_hat.dtype, list(y_hat.shape)],
+                                    ["target", target.dtype, list(target.shape)],
+                                ],
+                                headers=["", "dtype", "shape"],
+                                tablefmt="psql",
+                            )
+                            print(error)
+                        except:
+                            pass
+                        print("Removing log directory")
+                        shutil.rmtree(self.writer.log_dir)
+                        raise e
 
                     train_loss = torch.stack(train_loss).mean()
                     self.writer.add_scalar("Loss/train", train_loss, ep + 1)
                     # calculate validation loss
-                    self.model.eval()
                     val_loss = []
-                    for data, target in self.test_loader:
-                        data = data.cuda()
-                        target = target.cuda()
+                    for seq, data, target in self.test_loader:
+                        if not self.cudalize:
+                            data = cudalization(data)
+                            target = cudalization(target)
                         y_hat = self.predict(data, target)
                         val_loss.append(self.loss(y_hat, target, criterion,
-                                        eval=True, target_transform=target_transform, eval_metrics=eval_metrics))
+                                        eval=True, target_transform=target_transform, eval_metrics=eval_metrics, meta=create_meta(seq)))
                     val_loss = torch.stack(val_loss).mean()
                     self.writer.add_scalar("Loss/validation", val_loss, ep + 1)
+                    if val_loss < best_quantity:
+                        best_quantity = val_loss
+                        torch.save(self.model.state_dict(), Path(
+                            self.writer.log_dir) / f"epoch={ep+1}.pth")
                     # self.writer.add_scalars('Loss', {'validation': val_loss,
                     #                                  'train': train_loss}, ep + 1)
                     pbar.set_postfix({"loss": f"{train_loss:.3E}", "acc": f"{val_loss:.3E}"})
@@ -438,7 +444,8 @@ class Model:
         self.total_time += end_time - start_time
         print("----------- Training finished -----------")
         print()
-        torch.save(model.state_dict(), Path(self.writer.log_dir) / "checkpoint.pth")
+        checkpoint_path = Path(self.writer.log_dir) / "checkpoint.pth"
+        torch.save(model.state_dict(), checkpoint_path)
         shutil.copy(inspect.getfile(self.model.__class__), Path(self.writer.log_dir))
 
     @torch.no_grad()
@@ -453,23 +460,22 @@ class Model:
         print("[inference]")
         self.model.eval()
         if not preprocessing:
-            testset = self.preprocessing(testset)
+            testset = self.preprocessing(testset, True, True)
         loader = DataLoader(dataset=testset, batch_size=len(testset))
-        x = next(iter(loader))[0]
-        y = next(iter(loader))[1]
-        x = x.cuda()
-        y = y.cuda()
+        x = next(iter(loader))[1]
+        y = next(iter(loader))[2]
         if verbose:
-            return list(zip(x, self.predict(x, y).cpu(), y.cpu()))
+            ret = list(zip(x, self.predict(x, y), y))
         else:
-            return self.predict(x, y).cpu()
-
+            ret = self.predict(x, y)
+        self.model.train()
+        return ret
     # def __call__(self, x, y) -> gc.Any:
     #     x = self.xtransform(x)
     #     y = self.ytransform(y)
     #     return self.model(x, y)
 
-    def loss(self, y_hat, y, criterion, eval, target_transform, eval_metrics):
+    def loss(self, y_hat, y, criterion, eval, target_transform, eval_metrics, meta):
         try:
             y = target_transform(y_hat, y)
         except Exception as e:
@@ -479,9 +485,9 @@ class Model:
                 raise (e)
             # pass
         if eval and eval_metrics:
-            return eval_metrics(criterion, y_hat, y)
+            return eval_metrics(criterion, y_hat, y, meta)
         else:
-            return criterion(y_hat, y)
+            return criterion(y_hat, y, meta)
 
     @property
     def weight(self):
@@ -539,6 +545,8 @@ class Model:
         self.total_time = 0
 
 
+def loss_func(criterion):
+    return lambda y_hat, y, meta: criterion(y_hat, y)
 # def stratified_sampling(dataset: Dataset, train_samples_per_class: int):
 #     import collections
 
@@ -587,16 +595,14 @@ class Model:
 
 #     return torch.stack(result)
 def Hungarian_Order(g1b, g2b):
-    from scipy.optimize import linear_sum_assignment
-
     # cost matrix
-    T = np.zeros((len(g1b), len(g1b[0]), len(g1b[0])))
+    T = np.zeros((len(g1b[0]), len(g1b[0])))
     for idx, (g1, g2) in enumerate(zip(torch.as_tensor(g1b), torch.as_tensor(g2b))):
         for i, ix in enumerate(g1):
             for j, jx in enumerate(g2):
-                T[idx][i][j] = torch.square(ix - jx).sum()
-        row_ind, col_ind = linear_sum_assignment(T[idx])
-        g2b[idx] = g2b[idx][col_ind]
+                T[i][j] = torch.square(ix - jx).sum()
+        row_ind, col_ind = linear_sum_assignment(T)
+        g2b[idx] = g2b[idx][row_ind][col_ind]
 
     return g2b
 
@@ -694,7 +700,7 @@ def flatten_list(lst):
     for item in lst:
         if isinstance(item, list) or isinstance(item, tuple):
             flattened_list.extend(flatten_list(item))
-        else:
+        elif item is not None:
             flattened_list.append(item)
     return flattened_list
 
@@ -705,7 +711,7 @@ def plot_images(images, img_width=None, max_images=5):
     images = images[:max_images]
     L = len(images)
     images = flatten_list(images)
-
+    print(len(images))
     for i in range(len(images)):
         if isinstance(images[i], torch.Tensor):
             images[i] = transforms.ToPILImage()(images[i])
@@ -761,3 +767,35 @@ def reshape_to_square(image, desired_size, color=(255, 255, 255), verbose=False)
         return result, ratio
     else:
         return result
+
+
+def draw_bounding_boxes(img, box, width=2):
+    img = img.copy()
+    box = box.copy()
+    from torchvision.utils import draw_bounding_boxes
+    img_width = img.shape[0]
+    box[:, [1, 3]] -= 1
+    box[:, [1, 3]] *= -1
+    box[:, [1, 3]] = box[:, [3, 1]]
+    box = torch.tensor(box)
+    transform = transforms.Compose([transforms.ToImage(), transforms.ToDtype(torch.uint8)])
+    return draw_bounding_boxes(transform(img), boxes=box * img_width, colors="red", width=width)
+
+
+def draw_point(img, box, width=4):
+    if isinstance(img, np.ndarray):
+        img = img.copy()
+    elif isinstance(img, torch.Tensor):
+        img = img.cpu().detach().numpy()
+        transform = transforms.Compose([transforms.ToImage(), transforms.ToDtype(torch.uint8)])
+        img = transform(img)
+    if isinstance(box, np.ndarray):
+        box = box.copy()
+    else:
+        box = box.detach().cpu().numpy()
+    img_width = img.shape[0]
+    box[:, 1] -= 1
+    box[:, 1] *= -1
+    for b in box:
+        cv.circle(img, (int(b[0] * img_width), int(b[1] * img_width)), width, (0, 255, 0), -1)
+    return img

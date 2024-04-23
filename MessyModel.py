@@ -1,18 +1,16 @@
 # %%
-# %%
-
 from createdata import TestDataset
 from MessyDataset import MessyDataset
 from Model import *
 
 width = 200
 # Datasetbehaviour.RESET = True
-ds = MessyDataset(35000)
+Datasetbehaviour.MP = True
+ds = MessyDataset(10000)
+
 plot_images(ds)
 
 # %%
-
-
 xtransform = transforms.Compose([
     transforms.ToImage(),
     transforms.Grayscale(),
@@ -26,12 +24,11 @@ ytransform = transforms.Compose(
         transforms.ToImage(),
         transforms.Grayscale(),
         transforms.Resize((width, width)),
-        # ThresholdTransform(150),
         transforms.ToDtype(torch.float32, scale=True),
     ])
 
 
-model = Model("autoencoder", ds, 512, xtransform, ytransform, shuffle=False, use_cache=False)
+model = Model("autoencoder", ds, 512, xtransform, ytransform, shuffle=False)
 # plot_images(model, 200, max_images=2)
 
 # %%
@@ -122,7 +119,6 @@ class TransformerAutoencoder(nn.Module):
         x = self.to_patch_embedding(x)
         x += self.pos_embedding(x)
         x = self.encoder(x)
-        # tgt = self.tgt + self.pos_embedding(self.tgt)
         tgt = repeat(self.tgt, '1 a b -> c a b', c=x.shape[0])
         x = self.decoder(x, tgt)
 
@@ -135,11 +131,12 @@ m = TransformerAutoencoder(
     width, patch_size=10, dim=50, heads=1, mlp_dim=80, dropout=0, channels=1
 )
 
-model.fit(m, nn.MSELoss(), optim.Adam(m.parameters(), lr=1e-3), epochs=1000)
+model.fit(m, loss_func(nn.MSELoss()), optim.Adam(m.parameters(), lr=1e-3), epochs=1000)
 
 # %%
-
-result = model.inference(MessyDataset(10))
+# Datasetbehaviour.RESET = False
+ts = MessyDataset(10)
+result = model.inference(ts)
 plot_images(result, img_width=200, max_images=10)
 result = model.inference(TestDataset(3))
 plot_images(result, img_width=300)
