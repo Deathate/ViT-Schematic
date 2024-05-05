@@ -52,7 +52,8 @@ from PIL import Image, ImageOps
 from plotly.subplots import make_subplots
 from scipy.optimize import linear_sum_assignment
 from shapely import union
-from shapely.geometry import LineString, MultiLineString, MultiPoint, Point
+from shapely.geometry import LineString, MultiLineString, MultiPoint, Point, Polygon
+from shapely import ops
 from sklearn.metrics import accuracy_score, classification_report
 from tabulate import tabulate
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
@@ -128,7 +129,7 @@ class Datasetbehaviour:
         print("- New:", Datasetbehaviour.RESET)
         print("- Multiple Processes:", Datasetbehaviour.MP)
         if Path(self.filepath).exists() and not Datasetbehaviour.RESET:
-            print("    [cache found]:")
+            print("** [cache found]")
             print(textwrap.fill(self.filepath, 70, initial_indent=" " * 4))
             self.__dataset = pickle.load(open(self.filepath, "rb"))
         else:
@@ -293,8 +294,7 @@ class Model:
                 / Path(hashlib.sha256(transform_id.encode("utf-8")).hexdigest())
             )
         if load_from_cache and filepath.exists():
-            print("    [cache found]:")
-            print(textwrap.fill(str(filepath), 70, initial_indent=" " * 4))
+            print("** [cache found]")
             result = pickle.load(open(filepath, "rb"))
         else:
             try:
@@ -331,6 +331,7 @@ class Model:
             best_quantity = 1e5
         if pretrained_path:
             self.model.load_state_dict(torch.load(pretrained_path))
+            print("Pretrained model loaded")
             return
         if self.interrupt:
             return
@@ -342,7 +343,7 @@ class Model:
 
             if self.amp:
                 scaler = torch.cuda.amp.GradScaler()
-            early_stopping_monitor = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=15)
+            early_stopping_monitor = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=30)
 
             self.model.train()
             def create_meta(seq): return {"data": [self.data[s] for s in seq], "model": self.model}
@@ -711,7 +712,6 @@ def plot_images(images, img_width=None, max_images=5):
     images = images[:max_images]
     L = len(images)
     images = flatten_list(images)
-    print(len(images))
     for i in range(len(images)):
         if isinstance(images[i], torch.Tensor):
             images[i] = transforms.ToPILImage()(images[i])
