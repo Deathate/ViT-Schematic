@@ -1,5 +1,6 @@
 
 # %%
+import config
 from Model import *
 from visualizer import get_local
 from vit import Transformer
@@ -88,7 +89,7 @@ class DoubleLineFormalDataset(Datasetbehaviour):
                 if point_set.contains(Point(start)) or line_set.contains(Point(start)):
                     exit()
                 point_set = point_set.union(Point(start))
-                add_box(start, "grey")
+                # add_box(start, "grey")
 
                 middle = rng.integers(0, width, 2)
                 linepoints = add_line(start, middle)
@@ -106,7 +107,7 @@ class DoubleLineFormalDataset(Datasetbehaviour):
                         end = rng.integers(0, width, 2)
                         linepoints = add_line(middle, end)
                         if linepoints is not None:
-                            add_box(end, "gray")
+                            # add_box(end, "gray")
                             lineset.append(linepoints)
                             break
                     else:
@@ -190,9 +191,11 @@ class DoubleLineFormalDataset(Datasetbehaviour):
 
 Datasetbehaviour.MP = True
 # Datasetbehaviour.RESET = True
-dataset_guise = DoubleLineFormalDataset(20000, total_output=1, line_num=2)
+dataset_guise = DoubleLineFormalDataset(
+    config.DATA_NUM if not config.TEST else 2, total_output=1, line_num=2)
 # dataset_guise[0]
 plot_images(draw_point(dataset_guise[0][0], dataset_guise[0][1]))
+plot_images(dataset_guise[0][0])
 print(dataset_guise[0][1])
 # dataset_guise.view()
 # %%
@@ -210,8 +213,8 @@ def ytransform(x):
     return torch.tensor(s).float()
 
 
-model = Model("FindPoints", dataset_guise, 128,
-              xtransform=xtransform, ytransform=ytransform, amp=True, cudnn=False)
+model = Model("FindPoints", dataset_guise, config.BATCH_SIZE,
+              xtransform=xtransform, ytransform=ytransform, amp=False, cudnn=False)
 model.view()
 # %%
 # from torchmetrics.detection import CompleteIntersectionOverUnion
@@ -276,7 +279,7 @@ class ViT_ex(nn.Module):
             nn.ReLU(),
             nn.Linear(dim, dim),
             nn.ReLU(),
-            nn.Linear(dim, 3),
+            nn.Linear(dim, 3)
         )
         self.relation_head = nn.Sequential(
             nn.LayerNorm(dim * 3),
@@ -322,20 +325,16 @@ class ViT_ex(nn.Module):
 
 def criterion(y_hat, y, meta):
     box_head_result = meta["model"].box_head(y_hat[:, :result_num])
-    predicted_box, predicted_label = box_head_result[:, :, :2], box_head_result[:, :, 2]
-    Hungarian_Order(predicted_box[:, :, :2], y)
-    gtruth_label = (y[:, :, 0] > 0).to(torch.float32)
-    loss_box = []
-    for i in range(len(predicted_box)):
-        for j in range(len(predicted_box[i])):
-            if predicted_label[i][j] > 0.5:
-                bbox = predicted_box[i][j]
-                bbox = torch.sigmoid(bbox)
-                loss_box.append(F.l1_loss(bbox, y[i][j]))
+    predicted_box, predicted_label_logit = box_head_result[:, :, :2], box_head_result[:, :, 2]
+    predicted_label = (torch.sigmoid(predicted_label_logit) < 0.5)
+    Hungarian_Order(predicted_box[:, :, :2], y, nn.SmoothL1Loss())
+    gtruth_label = y[:, :, 0] > 0
+    gtruth_label = gtruth_label.to(torch.float32)
+    predicted_box[predicted_label] = y[predicted_label].to(predicted_box.dtype)
 
-    loss_box = torch.stack(loss_box).mean() if len(loss_box) > 0 else 0
-    loss_class = F.binary_cross_entropy_with_logits(predicted_label, gtruth_label)
-    return 5 * loss_box + loss_class
+    loss_class = F.binary_cross_entropy_with_logits(predicted_label_logit, gtruth_label)
+    loss_box = F.smooth_l1_loss(predicted_box, y)
+    return 3 * loss_box + loss_class
     # return loss_box
     relation_loss_list = []
 
@@ -399,15 +398,14 @@ dim = 256
 m = ViT_ex(image_size=200, patch_size=patch_size, dim=dim, depth=6,
            heads=8, mlp_dim=32, channels=1, dim_head=32, dropout=0.1, result_num=15, style=style)
 model.suffix = "_" + style
-pretrained_path = "runs/FindPoints/0503_16-59-10__decoder/epoch=163.pth"
-model.fit(m, criterion, optim.AdamW(m.parameters(), lr=1e-4),
-          2000)
+model.fit(m, criterion, optim.AdamW(m.parameters(), lr=config.LEARNING_RATE),
+          2000, pretrained_path=config.PRETRAINED_PATH if config.TEST else "")
 model.view()
 # %%
 
 get_local.activate()
 Datasetbehaviour.RESET = True
-dataset_test = DoubleLineFormalDataset(5, total_output=1, line_num=2)
+dataset_test = DoubleLineFormalDataset(10, total_output=1, line_num=2)
 result = model.inference(dataset_test)
 
 # print(model.model.box_head(result[0][1][:4]))
@@ -419,15 +417,8 @@ for i, d in enumerate(dataset_test):
     box_latent = model.model.box_head(latent[:result_num])
     box = box_latent[:, :2]
     classes = F.sigmoid(box_latent[:, 2]) > 0.5
-    for j in range(len(classes)):
-        if classes[j]:
-            box[i] = 0
-    print(result[2])
-    # print(classes)
-    print(box)
-    exit()
+    box[~classes] = 0
     image = draw_point(image, box)
-
     # for a, b in itertools.combinations(latent[:4], 2):
     #     relations = model.model.relation_head(torch.cat((a, b, latent[-1])))
     #     print(F.sigmoid(relations))

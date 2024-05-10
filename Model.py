@@ -595,13 +595,13 @@ def loss_func(criterion):
 
 
 #     return torch.stack(result)
-def Hungarian_Order(g1b, g2b):
+def Hungarian_Order(g1b, g2b, criterion):
     # cost matrix
     T = np.zeros((len(g1b[0]), len(g1b[0])))
     for idx, (g1, g2) in enumerate(zip(torch.as_tensor(g1b), torch.as_tensor(g2b))):
         for i, ix in enumerate(g1):
             for j, jx in enumerate(g2):
-                T[i][j] = torch.square(ix - jx).sum()
+                T[i][j] = criterion(ix, jx)
         row_ind, col_ind = linear_sum_assignment(T)
         g2b[idx] = g2b[idx][row_ind][col_ind]
 
