@@ -17,6 +17,7 @@ import shutil
 import textwrap
 import time
 import typing
+from collections import OrderedDict, namedtuple
 from dataclasses import dataclass
 from functools import partial
 from inspect import signature
@@ -51,9 +52,8 @@ from IPython.display import display
 from PIL import Image, ImageOps
 from plotly.subplots import make_subplots
 from scipy.optimize import linear_sum_assignment
-from shapely import union
+from shapely import ops, union
 from shapely.geometry import LineString, MultiLineString, MultiPoint, Point, Polygon
-from shapely import ops
 from sklearn.metrics import accuracy_score, classification_report
 from tabulate import tabulate
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
@@ -136,15 +136,15 @@ class Datasetbehaviour:
             if not Datasetbehaviour.MP:
                 dataset = []
                 for _ in tqdm(range(self.size)):
-                    dataset.append(DataCell(*self.creater()))
+                    dataset.append(self.creater())
             else:
 
                 dataset = p_tqdm.p_umap(
-                    lambda _: DataCell(*self.creater()),
+                    lambda _: self.creater(),
                     range(self.size),
                     num_cpus=os.cpu_count() - 4,
                 )
-            self.__dataset = dataset
+            self.__dataset = np.array(dataset, dtype=object)
             pickle.dump(self.__dataset, open(self.filepath, "wb"))
         print("--- [finish creation] ---\n")
         Datasetbehaviour.reset()
@@ -152,6 +152,16 @@ class Datasetbehaviour:
     def __getitem__(self, idx):
         if self.__dataset is None:
             self.__load()
+        contain_slice = False
+        if isinstance(idx, slice):
+            contain_slice = True
+        if isinstance(idx, tuple):
+            for i in idx:
+                if isinstance(i, slice):
+                    contain_slice = True
+                    break
+        if contain_slice:
+            return self.__dataset[idx].tolist()
 
         return self.__dataset[idx]
 
@@ -219,8 +229,10 @@ class Model:
         suffix="",
         cudalize=True,
         use_cache=True,
-
+        memory_fraction=1,
     ):
+        if memory_fraction < 1:
+            torch.cuda.set_per_process_memory_fraction(memory_fraction)
         self.name = name
         self.xtransform = xtransform
         self.ytransform = ytransform
@@ -229,7 +241,8 @@ class Model:
             self.xtransform = lambda x: torch.tensor(x).float().cuda()
         if self.ytransform is None:
             self.ytransform = lambda x: torch.tensor(x).float().cuda()
-        select_gpu_with_most_free_memory()
+        if torch.cuda.device_count() > 1:
+            select_gpu_with_most_free_memory()
         # torch.set_default_device('cuda')
         self.cudalize = cudalize
         self.data = data
@@ -259,6 +272,7 @@ class Model:
         self.amp = amp
         torch.backends.cudnn.benchmark = cudnn
         self.writer = None
+        torch.set_float32_matmul_precision("high")
 
     def tensorboard_setting(self, parent, name):
         if self.writer:
@@ -270,6 +284,7 @@ class Model:
             "metrics": {
                 "loss": ["Multiline", ["Loss/train"]],
                 "accuracy": ["Multiline", ["Loss/validation"]],
+                "learning rate": ["Multiline", ["lr"]],
             },
         }
         self.writer.add_custom_scalars(layout)
@@ -298,8 +313,10 @@ class Model:
             result = pickle.load(open(filepath, "rb"))
         else:
             try:
-                result = [[i, self.xtransform(x.input), self.ytransform(x.output)]
-                          for i, x in enumerate(tqdm(data))]
+                result = [
+                    [i, self.xtransform(x[0]), self.ytransform(x[1])]
+                    for i, x in enumerate(tqdm(data))
+                ]
             except Exception as e:
                 print("Error in transformation")
                 raise (e)
@@ -316,40 +333,66 @@ class Model:
         print("--- [finish preprocessing] ---\n")
         return result
 
-    def fit(self, model, criterion, optimizer, epochs=1, compile=False, target_transform=lambda y_hat, y: y, early_stopping=True, eval_metrics=None, training_epoch_end=None, pretrained_path=""):
+    def fit(
+        self,
+        model,
+        criterion,
+        optimizer,
+        epochs=1,
+        compile=False,
+        target_transform=lambda y_hat, y: y,
+        early_stopping=False,
+        eval_metrics=None,
+        training_epoch_end=None,
+        pretrained_path=None,
+        keep=True,
+        backprop_freq=1,
+    ):
+        backprop_freq = int(backprop_freq)
+        if pretrained_path:
+            checkpoint = torch.load(pretrained_path)
+            if isinstance(checkpoint, OrderedDict):
+                model.load_state_dict(checkpoint, strict=False)
+            else:
+                model.load_state_dict(checkpoint["model"], strict=False)
+                optimizer.load_state_dict(checkpoint["optimizer"])
+            print("** [Pretrained model loaded]")
+        self.model = model.cuda()
+        # accelerate trining speed
+        if compile:
+            self.model = torch.compile(self.model, mode="reduce-overhead")
+        if not keep:
+            return
         if id(model) != self.model_id:
             self.model_id = id(model)
             self.gc()
             self.tensorboard_setting(self.name, self.suffix)
-            self.model = model.cuda()
+            shutil.copy(inspect.getfile(self.model.__class__), Path(self.writer.log_dir))
             self.model_overview(self.model)
             print(f"Model: {self.model.__class__.__name__}, ID:{self.model_id}")
-            # accelerate trining speed
-            if compile:
-                self.model = torch.compile(self.model, mode="reduce-overhead")
-            torch.set_float32_matmul_precision("high")
-            best_quantity = 1e5
-        if pretrained_path:
-            self.model.load_state_dict(torch.load(pretrained_path))
-            print("Pretrained model loaded")
-            return
         if self.interrupt:
             return
         try:
+            best_quantity = 1e5
             print("----------- Training started -----------")
             start_time = time.time()
             start = self.ep
-            end = self.ep + epochs
+            end = epochs
 
             if self.amp:
                 scaler = torch.cuda.amp.GradScaler()
             early_stopping_monitor = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=30)
+            # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, min_lr=1e-6)
 
             self.model.train()
-            def create_meta(seq): return {"data": [self.data[s] for s in seq], "model": self.model}
+            Meta_data = namedtuple("Meta_data", ["data", "model"])
+
+            def create_meta(seq):
+                return Meta_data([DataCell(*self.data[s]) for s in seq], self.model)
+
             for ep in range(start, end):
                 with tqdm(
-                    total=len(self.train_loader),
+                    total=len(self.train_loader) // backprop_freq,
                     bar_format="{desc}{n_fmt}/{total_fmt}|{bar}| - {elapsed}s{postfix}",
                 ) as pbar:
                     pbar.set_description(f"Epoch {ep+1}/{end}")
@@ -357,7 +400,9 @@ class Model:
                     pbar.set_postfix({"loss": "---", "acc": "---"})
 
                     try:
-                        for seq, data, target in self.train_loader:
+                        self.model.train()
+                        accum_loss = 0
+                        for batch_num, (seq, data, target) in enumerate(self.train_loader):
                             if not self.cudalize:
                                 data = cudalization(data)
                                 target = cudalization(target)
@@ -365,30 +410,57 @@ class Model:
                             if self.amp:
                                 with torch.cuda.amp.autocast():
                                     y_hat = self.model(data, target)
-                                    loss = self.loss(y_hat, target, criterion, eval=False,
-                                                     target_transform=target_transform, eval_metrics=eval_metrics, meta=create_meta(seq))
-                                optimizer.zero_grad()
-                                scaler.scale(loss).backward()
-                                scaler.step(optimizer)
-                                scaler.update()
+                                    loss = (
+                                        self.loss(
+                                            y_hat,
+                                            target,
+                                            criterion,
+                                            eval=False,
+                                            target_transform=target_transform,
+                                            eval_metrics=eval_metrics,
+                                            meta=create_meta(seq),
+                                        )
+                                        / backprop_freq
+                                    )
+                                    scaler.scale(loss).backward()
+                                    accum_loss += loss.item()
+                                    # pbar.write(f"loss: {loss.item()}")
                             else:
                                 y_hat = self.model(data, target)
-                                loss = self.loss(y_hat, target, criterion, eval=False,
-                                                 target_transform=target_transform, eval_metrics=eval_metrics, meta=create_meta(seq))
-                                optimizer.zero_grad()
+                                loss = (
+                                    self.loss(
+                                        y_hat,
+                                        target,
+                                        criterion,
+                                        eval=False,
+                                        target_transform=target_transform,
+                                        eval_metrics=eval_metrics,
+                                        meta=create_meta(seq),
+                                    )
+                                    / backprop_freq
+                                )
                                 loss.backward()
-                                optimizer.step()
+                                accum_loss += loss.item()
+                            if (batch_num + 1) % backprop_freq == 0:
+                                if self.amp:
+                                    scaler.step(optimizer)
+                                    scaler.update()
+                                    optimizer.zero_grad()
+                                else:
+                                    optimizer.step()
+                                    optimizer.zero_grad()
+                                # if ep == 0:
+                                #     from torchviz import make_dot
+                                #     graph = make_dot(y_hat, params=dict(model.named_parameters()))
+                                #     graph.render(Path(self.writer.log_dir) /
+                                #                  "model_graph", format="png")
 
-                            # if ep == 0:
-                            #     from torchviz import make_dot
-                            #     graph = make_dot(y_hat, params=dict(model.named_parameters()))
-                            #     graph.render(Path(self.writer.log_dir) /
-                            #                  "model_graph", format="png")
-
-                            # torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1)
-                            train_loss.append(loss)
-                            pbar.set_postfix({"loss": f"{loss:.3E}", "acc": "---"})
-                            pbar.update(1)
+                                # torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1)
+                                pbar.set_postfix({"loss": f"{accum_loss:.3E}", "acc": "---"})
+                                pbar.update(1)
+                                train_loss.append(accum_loss)
+                                accum_loss = 0
+                        self.model.eval()
                         if training_epoch_end:
                             training_epoch_end()
                     except Exception as e:
@@ -410,7 +482,7 @@ class Model:
                         shutil.rmtree(self.writer.log_dir)
                         raise e
 
-                    train_loss = torch.stack(train_loss).mean()
+                    train_loss = np.mean(train_loss)
                     self.writer.add_scalar("Loss/train", train_loss, ep + 1)
                     # calculate validation loss
                     val_loss = []
@@ -419,35 +491,52 @@ class Model:
                             data = cudalization(data)
                             target = cudalization(target)
                         y_hat = self.predict(data, target)
-                        val_loss.append(self.loss(y_hat, target, criterion,
-                                        eval=True, target_transform=target_transform, eval_metrics=eval_metrics, meta=create_meta(seq)))
+                        val_loss.append(
+                            self.loss(
+                                y_hat,
+                                target,
+                                criterion,
+                                eval=True,
+                                target_transform=target_transform,
+                                eval_metrics=eval_metrics,
+                                meta=create_meta(seq),
+                            )
+                        )
                     val_loss = torch.stack(val_loss).mean()
                     self.writer.add_scalar("Loss/validation", val_loss, ep + 1)
                     if val_loss < best_quantity:
                         best_quantity = val_loss
-                        torch.save(self.model.state_dict(), Path(
-                            self.writer.log_dir) / f"epoch={ep+1}.pth")
+                        torch.save(
+                            {
+                                "model": self.model.state_dict(),
+                                "optimizer": optimizer.state_dict(),
+                            },
+                            Path(self.writer.log_dir) / "best.pth",
+                        )
                     # self.writer.add_scalars('Loss', {'validation': val_loss,
                     #                                  'train': train_loss}, ep + 1)
                     pbar.set_postfix({"loss": f"{train_loss:.3E}", "acc": f"{val_loss:.3E}"})
+                    # scheduler.step(val_loss)
+                    self.writer.add_scalar("lr", optimizer.param_groups[0]["lr"], ep + 1)
                     if early_stopping:
                         early_stopping_monitor.step(train_loss)
                         if early_stopping_monitor.num_bad_epochs >= early_stopping_monitor.patience:
                             print("Early Stopping")
                             break
+
             self.ep = ep + 1
         except KeyboardInterrupt:
             print("Keyboard interrupt received.")
             self.interrupt = True
+            if ep < 10:
+                print("Removing log directory")
+                shutil.rmtree(self.writer.log_dir)
 
         end_time = time.time()
         print(f"Elapsed time: {end_time - start_time + self.total_time:.3f} seconds")
         self.total_time += end_time - start_time
         print("----------- Training finished -----------")
         print()
-        checkpoint_path = Path(self.writer.log_dir) / "checkpoint.pth"
-        torch.save(model.state_dict(), checkpoint_path)
-        shutil.copy(inspect.getfile(self.model.__class__), Path(self.writer.log_dir))
 
     @torch.no_grad()
     def predict(self, data: torch.tensor, target: torch.tensor):
@@ -469,8 +558,8 @@ class Model:
             ret = list(zip(x, self.predict(x, y), y))
         else:
             ret = self.predict(x, y)
-        self.model.train()
         return ret
+
     # def __call__(self, x, y) -> gc.Any:
     #     x = self.xtransform(x)
     #     y = self.ytransform(y)
@@ -548,6 +637,8 @@ class Model:
 
 def loss_func(criterion):
     return lambda y_hat, y, meta: criterion(y_hat, y)
+
+
 # def stratified_sampling(dataset: Dataset, train_samples_per_class: int):
 #     import collections
 
@@ -605,7 +696,21 @@ def Hungarian_Order(g1b, g2b, criterion):
         row_ind, col_ind = linear_sum_assignment(T)
         g2b[idx] = g2b[idx][row_ind][col_ind]
 
-    return g2b
+
+#     return g2b
+# def Hungarian_Order(g1b, g2b, criterion):
+#     # cost matrix
+#     T = np.zeros((len(g1b[0]), len(g1b[0])))
+#     indices = []
+#     for idx, (g1, g2) in enumerate(zip(torch.as_tensor(g1b), torch.as_tensor(g2b))):
+#         for i, ix in enumerate(g1):
+#             for j, jx in enumerate(g2):
+#                 T[i][j] = criterion(ix, jx)
+#         indices.append(linear_sum_assignment(T))
+#     return [
+#         (torch.as_tensor(i, dtype=torch.int64), torch.as_tensor(j, dtype=torch.int64))
+#         for i, j in indices
+#     ]
 
 
 class PositionalEncoding(nn.Module):
@@ -632,6 +737,13 @@ class PositionalEncoding(nn.Module):
         return self.pe[:, : x.size(1)]
 
 
+def shapely_to_numpy(shapely_obj):
+    if isinstance(shapely_obj, Point):
+        return np.array(shapely_obj.coords)
+    else:
+        raise ValueError("Not supported type")
+
+
 def plotly_to_array(fig):
     image_bytes = fig.to_image(format="jpg")
     return np.asarray(Image.open(io.BytesIO(image_bytes)))
@@ -641,20 +753,24 @@ def seaborn_to_array(fig):
     return np.asarray(fig.get_figure().canvas.buffer_rgba())
 
 
-def visualize_attentions(maps):
+def visualize_attentions(maps, has_attention=False):
     map_num = len(maps[0]) - 1
     fig = make_subplots(rows=1, cols=map_num + 1, horizontal_spacing=0)
-
-    for i in range(len(maps)):
-        for j in range(1, map_num + 1):
-            fig.add_heatmap(
-                z=maps[i][j],
-                visible=False,
-                row=1,
-                col=j,
-                showscale=True if j == 1 else False,
-            )
-        fig.add_image(z=maps[i][0], visible=False, row=1, col=map_num + 1)
+    if has_attention:
+        for i in range(len(maps)):
+            for j in range(1, map_num + 1):
+                fig.add_heatmap(
+                    z=maps[i][j],
+                    visible=False,
+                    row=1,
+                    col=j,
+                    showscale=True if j == 1 else False,
+                )
+            fig.add_image(z=maps[i][0], visible=False, row=1, col=map_num + 1)
+    else:
+        for i in range(len(maps)):
+            for j in range(map_num + 1):
+                fig.add_image(z=maps[i][j], visible=False, row=1, col=j + 1)
     for i in range(map_num + 1):
         fig.data[i].visible = True
     steps = []
@@ -693,6 +809,7 @@ def static_vars(**kwargs):
         for k in kwargs:
             setattr(func, k, kwargs[k])
         return func
+
     return decorate
 
 
@@ -707,7 +824,12 @@ def flatten_list(lst):
 
 
 def plot_images(images, img_width=None, max_images=5):
-    if not isinstance(images, abc.Sequence) and not isinstance(images, Datasetbehaviour) and not isinstance(images, Model):
+    if (
+        not isinstance(images, abc.Sequence)
+        and not isinstance(images, Datasetbehaviour)
+        and not isinstance(images, Model)
+        and (isinstance(images, np.ndarray) and len(images.shape) == 3)
+    ):
         images = [images]
     images = images[:max_images]
     L = len(images)
@@ -725,13 +847,12 @@ def plot_images(images, img_width=None, max_images=5):
     if len(images) == 1:
         images = images[0]
         height = images.shape[0] if img_width == -1 else img_width if img_width else 200
-        display(ImageOps.contain(
-            Image.fromarray(images), (height, height)))
+        display(ImageOps.contain(Image.fromarray(images), (height, height)))
     else:
         for i in range(0, len(images), cols):
             height = images[i].shape[0] if img_width == -1 else img_width if img_width else 200
             ipyplot.plot_images(
-                images[i: i + cols],
+                images[i : i + cols],
                 img_width=height,
             )
 
@@ -762,7 +883,7 @@ def reshape_to_square(image, desired_size, color=(255, 255, 255), verbose=False)
     x_center = (desired_size - old_image_width) // 2
     y_center = (desired_size - old_image_height) // 2
     # copy img image into center of result image
-    result[x_center:x_center + old_image_width, y_center:y_center + old_image_height] = image
+    result[x_center : x_center + old_image_width, y_center : y_center + old_image_height] = image
     if verbose:
         return result, ratio
     else:
@@ -773,6 +894,7 @@ def draw_bounding_boxes(img, box, width=2):
     img = img.copy()
     box = box.copy()
     from torchvision.utils import draw_bounding_boxes
+
     img_width = img.shape[0]
     box[:, [1, 3]] -= 1
     box[:, [1, 3]] *= -1
