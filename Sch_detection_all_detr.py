@@ -618,7 +618,6 @@ model.fit(
     keep=True,
     # backprop_freq=256 / 64,
 )
-exit()
 # %%
 get_local.activate()
 Datasetbehaviour.RESET = True

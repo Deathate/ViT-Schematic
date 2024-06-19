@@ -339,6 +339,7 @@ class Model:
         criterion,
         optimizer,
         epochs=1,
+        start_epoch=None,
         compile=False,
         target_transform=lambda y_hat, y: y,
         early_stopping=False,
@@ -350,15 +351,24 @@ class Model:
     ):
         backprop_freq = int(backprop_freq)
         if pretrained_path:
+            print("** [Pretrained model loaded]")
             checkpoint = torch.load(pretrained_path)
             if isinstance(checkpoint, OrderedDict):
                 model.load_state_dict(checkpoint, strict=False)
+                self.model = model.cuda()
             else:
+                lr = optimizer.param_groups[0]["lr"]
+                # it is recommended to move a model to GPU before constructing an optimizer
                 model.load_state_dict(checkpoint["model"], strict=False)
+                self.model = model.cuda()
+                print("** [Pretrained optimizer loaded]")
                 optimizer.load_state_dict(checkpoint["optimizer"])
-            print("** [Pretrained model loaded]")
-        self.model = model.cuda()
-        # accelerate trining speed
+                if optimizer.param_groups[0]["lr"] != lr:
+                    print(f"** [Optimizer learning rate changed to {lr}]")
+                    optimizer.param_groups[0]["lr"] = lr
+        else:
+            self.model = model.cuda()
+        # accelerate training speed
         if compile:
             self.model = torch.compile(self.model, mode="reduce-overhead")
         if not keep:
@@ -376,6 +386,8 @@ class Model:
             best_quantity = 1e5
             print("----------- Training started -----------")
             start_time = time.time()
+            if start_epoch is not None:
+                self.ep = start_epoch
             start = self.ep
             end = epochs
 
@@ -921,3 +933,8 @@ def draw_point(img, box, width=4):
     for b in box:
         cv.circle(img, (int(b[0] * img_width), int(b[1] * img_width)), width, (0, 255, 0), -1)
     return img
+
+
+def get_lr(optimizer):
+    for param_group in optimizer.param_groups:
+        return param_group["lr"]

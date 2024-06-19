@@ -1,7 +1,6 @@
 # %%
 import config
 from Model import *
-from visualizer import get_local
 from vit import Transformer
 
 
@@ -195,15 +194,15 @@ class DoubleLineFormalDataset(Datasetbehaviour):
                 G.add_edge(line[0].tobytes(), line[1].tobytes())
             for x in G.nodes:
                 target_all.append(np.frombuffer(x, dtype=np.float32))
-            relation = np.zeros((len(target_all), len(target_all)), dtype=bool)
-            for i in range(len(target_all)):
-                for j in range(len(target_all)):
-                    if i == j:
-                        continue
-                    if G.has_edge(target_all[i].tobytes(), target_all[j].tobytes()):
-                        relation[i][j] = True
-                        relation[j][i] = True
-            return (plotly_to_array(fig)), (np.array(target_all)), relation
+            # relation = np.zeros((len(target_all), len(target_all)), dtype=bool)
+            # for i in range(len(target_all)):
+            #     for j in range(len(target_all)):
+            #         if i == j:
+            #             continue
+            #         if G.has_edge(target_all[i].tobytes(), target_all[j].tobytes()):
+            #             relation[i][j] = True
+            #             relation[j][i] = True
+            return (plotly_to_array(fig)), (np.array(target_all)), G
 
         rng = np.random.default_rng()
         while True:
@@ -215,13 +214,15 @@ class DoubleLineFormalDataset(Datasetbehaviour):
 
 
 data_size = config.DATA_NUM
+if data_size > 10000:
+    Datasetbehaviour.MP = True
 dataset_guise = DoubleLineFormalDataset(data_size, total_output=3, line_num=2)
 result_num = 18
 # %%
 if config.EVAL:
-    for i in range(2):
-        plot_images(draw_point(dataset_guise[i][0], dataset_guise[i][1]))
-        print(len(dataset_guise[i][1]))
+    for i in range(3):
+        # plot_images(draw_point(dataset_guise[i][0], dataset_guise[i][1]))
+        plot_images(dataset_guise[i][0])
     dataset_guise.view()
 # %%
 
@@ -248,7 +249,7 @@ model = Model(
     amp=True,
     cudnn=False,
     batch_size=config.BATCH_SIZE,
-    memory_fraction=0.5,
+    # memory_fraction=0.5,
 )
 model.view()
 # %%
@@ -328,10 +329,11 @@ class ViT_ex(nn.Module):
         self.box_head = nn.Sequential(
             nn.Linear(dim, dim), nn.ReLU(), nn.Linear(dim, dim), nn.ReLU(), nn.Linear(dim, 3)
         )
-        self.relation_head = nn.Sequential(
-            nn.LayerNorm(dim * 3),
+        self.relation_heads = nn.Sequential(
             nn.Linear(dim * 3, dim),
-            nn.LayerNorm(dim),
+            nn.ReLU(),
+            nn.Linear(dim, dim),
+            nn.ReLU(),
             nn.Linear(dim, 1),
         )
         # self.label_query = nn.Sequential(
@@ -396,14 +398,14 @@ def Hungarian_Order(g1b, g2b):
     return indices
 
 
-stage = 0
+stage = 1
 
 
 def criterion(y_hat, y, meta):
     box_head_result = meta.model.box_head(y_hat[:, :result_num])
     predicted_box, predicted_label_logit = box_head_result[:, :, :2], box_head_result[:, :, 2]
     predicted_label = torch.sigmoid(predicted_label_logit) < 0.5
-    indices = Hungarian_Order(predicted_box, y)
+    Hungarian_Order(predicted_box, y)
     gtruth_label = y[:, :, 0] > 0
     gtruth_label = gtruth_label.to(torch.float32)
     predicted_box[predicted_label] = y[predicted_label].to(predicted_box.dtype)
@@ -411,27 +413,25 @@ def criterion(y_hat, y, meta):
     loss_box = F.smooth_l1_loss(predicted_box, y)
     loss_class = F.binary_cross_entropy_with_logits(predicted_label_logit, gtruth_label)
     if stage == 0:
-        return 5 * loss_box + loss_class
+        return 3 * loss_box + loss_class
     elif stage == 1:
-        valid_relation_num = 2
-        non_valid_relation_num = 4
+        valid_relation_num = 1
+        non_valid_relation_num = 2
         joint_token_list = []
         label_list = []
-        for i in range(len(indices)):
+        for i, element in enumerate(y.cpu().detach().numpy()):
             valid_relation = []
             non_valid_relation = []
-            element_with_order = list(enumerate(indices[i]))
+            element_with_order = list(enumerate(element))
             np.random.shuffle(element_with_order)
             for c1, c2 in itertools.combinations(element_with_order, 2):
-                c1n = c1[1]
-                c2n = c2[1]
+                c1n = c1[1].tobytes()
+                c2n = c2[1].tobytes()
                 box_pair = [c1[0], c2[0]]
-                num_box = len(meta.data[i].meta)
-                if c1n < num_box and c2n < num_box and meta.data[i].meta[c1n][c2n]:
+                if meta.data[i].meta.has_edge(c1n, c2n):
                     valid_relation.append(box_pair)
                 else:
                     non_valid_relation.append(box_pair)
-
             for times, relation, label in [
                 (valid_relation_num, valid_relation, 1),
                 (non_valid_relation_num, non_valid_relation, 0),
@@ -445,15 +445,17 @@ def criterion(y_hat, y, meta):
                     rln_token = y_hat[i][-1]
                     joint_token = torch.cat((obj_token_1, obj_token_2, rln_token))
                     joint_token_inv = torch.cat((obj_token_2, obj_token_1, rln_token))
+                    # joint_token = torch.cat((obj_token_1, obj_token_2))
+                    # joint_token_inv = torch.cat((obj_token_2, obj_token_1))
                     joint_token_list.append(joint_token)
                     joint_token_list.append(joint_token_inv)
                     label_list.append(label)
                     label_list.append(label)
         loss_relation = F.binary_cross_entropy_with_logits(
-            meta.model.relation_head(torch.stack(joint_token_list)),
+            meta.model.relation_heads(torch.stack(joint_token_list)),
             torch.stack(label_list).cuda(),
         )
-    return 5 * loss_box + loss_class + loss_relation
+    return 3 * loss_box + loss_class + loss_relation
 
     for y1, y2 in zip(y_hat, y):
         predicted_box = meta["model"].box_head(y1)
@@ -475,7 +477,6 @@ def criterion(y_hat, y, meta):
     return total_loss
 
 
-get_local.deactivate()
 style = "decoder"
 # m = ViT_ex(image_size=200, patch_size=patch_size, dim=dim, depth=1,
 #            heads=8, mlp_dim=32, channels=1, dim_head=32, dropout=0.1, result_num=15, style=style)
@@ -498,15 +499,14 @@ model.fit(
     m,
     criterion,
     optim.AdamW(m.parameters(), lr=config.LEARNING_RATE),
-    2000,
+    3000,
     pretrained_path=config.PRETRAINED_PATH,
     keep=not config.EVAL,
     backprop_freq=config.BATCH_STEP,
+    start_epoch=2074,
 )
-exit()
 # %%
-get_local.activate()
-Datasetbehaviour.RESET = True
+# Datasetbehaviour.RESET = True
 dataset_test = DoubleLineFormalDataset(10, total_output=3, line_num=2)
 result = model.inference(dataset_test)
 
@@ -515,6 +515,7 @@ result = model.inference(dataset_test)
 canvas = []
 for i, d in enumerate(dataset_test):
     image = dataset_test[i][0]
+    image_bk = image.copy()
     image_line = image.copy()
     latent = result[i][1]
     box_latent = model.model.box_head(latent[:result_num])
@@ -522,21 +523,22 @@ for i, d in enumerate(dataset_test):
     classes = F.sigmoid(box_latent[:, 2]) > 0.5
     box[~classes] = 0
     image = draw_point(image, box)
-    # for a, b in itertools.combinations(latent[:result_num], 2):
-    #     relations = model.model.relation_head(torch.cat((a, b, latent[-1])))
-    #     if F.sigmoid(relations) > 0.5:
-    #         p1 = model.model.box_head(a).detach().cpu()
-    #         p2 = model.model.box_head(b).detach().cpu()
-    #         if F.sigmoid(p1[2]) > 0.5 and F.sigmoid(p2[2]) > 0.5:
-    #             p1_pos, p2_pos = p1[:2].numpy(), p2[:2].numpy()
-    #             p1_pos[1] = 1 - p1_pos[1]
-    #             p2_pos[1] = 1 - p2_pos[1]
-    #             p1_pos *= 200
-    #             p2_pos *= 200
-    #             p1_pos = p1_pos.astype(int)
-    #             p2_pos = p2_pos.astype(int)
-    #             cv.line(image_line, p1_pos, p2_pos, color=(0, 0, 255), thickness=2)
+    for a, b in itertools.combinations(latent[:result_num], 2):
+        relations = model.model.relation_heads(torch.cat((a, b, latent[-1])))
+        if F.sigmoid(relations) > 0.5:
+            p1 = model.model.box_head(a).detach().cpu()
+            p2 = model.model.box_head(b).detach().cpu()
+            if F.sigmoid(p1[2]) > 0.5 and F.sigmoid(p2[2]) > 0.5:
+                p1_pos, p2_pos = p1[:2].numpy(), p2[:2].numpy()
+                p1_pos[1] = 1 - p1_pos[1]
+                p2_pos[1] = 1 - p2_pos[1]
+                p1_pos *= 200
+                p2_pos *= 200
+                p1_pos = p1_pos.astype(int)
+                p2_pos = p2_pos.astype(int)
+                color = random.choice([(255, 0, 0), (0, 255, 0), (0, 0, 255)])
+                cv.line(image_line, p1_pos, p2_pos, color=(0, 0, 255), thickness=2)
     # attention_map = get_local.cache["Attention.forward"][0][i][0][0][:25].reshape(5, 5)
-    canvas.append([image, image_line])
+    canvas.append([image_bk, image, image_line])
 visualize_attentions(canvas)
 # pprint(result)
