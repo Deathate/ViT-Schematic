@@ -1,9 +1,18 @@
 """From Bradley, Hax and Maganti, 'Applied Mathematical Programming', figure 8.1."""
-# %%
+
 import numpy as np
 import torch
-torch.load("best.pt")
-
+import pickle
+# from collections import
+from pprint import pprint
+from itertools import chain
+# with open("dataset/pkl/circuit0.pkl",encoding="utf8") as file:
+#     data = pickle.load(file)
+#     print(data)
+data = pickle.load(open("dataset/pkl/circuit0.pkl", "rb"))
+# pprint(list(data.values()))
+# flatten a list of lists
+print(np.array(list(chain.from_iterable(data.values()))).reshape(-1,2))
 
 # def Hungarian_Order(g1b, g2b):
 #     from scipy.optimize import linear_sum_assignment

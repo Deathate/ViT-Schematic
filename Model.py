@@ -6,6 +6,7 @@ import hashlib
 import inspect
 import io
 import itertools
+from itertools import chain
 import json
 import logging
 import math
@@ -52,7 +53,7 @@ from IPython.display import display
 from PIL import Image, ImageOps
 from plotly.subplots import make_subplots
 from scipy.optimize import linear_sum_assignment
-from shapely import ops, union
+from shapely import ops, union, union_all
 from shapely.geometry import LineString, MultiLineString, MultiPoint, Point, Polygon
 from sklearn.metrics import accuracy_score, classification_report
 from tabulate import tabulate
@@ -138,7 +139,6 @@ class Datasetbehaviour:
                 for _ in tqdm(range(self.size)):
                     dataset.append(self.creater())
             else:
-
                 dataset = p_tqdm.p_umap(
                     lambda _: self.creater(),
                     range(self.size),
@@ -927,11 +927,34 @@ def draw_point(img, box, width=4):
         box = box.copy()
     else:
         box = box.detach().cpu().numpy()
-    img_width = img.shape[0]
-    box[:, 1] -= 1
-    box[:, 1] *= -1
+    img_width = img.shape[1]
+    img_height = img.shape[0]
+    box[..., 1] = 1 - box[..., 1]
+    box[...,0]*=img_width
+    box[...,1]*=img_height
+    box = box.astype(np.int32)
     for b in box:
-        cv.circle(img, (int(b[0] * img_width), int(b[1] * img_width)), width, (0, 255, 0), -1)
+        cv.circle(img, (b[0], b[1]), width, (0, 255, 0), -1)
+    return img
+def draw_line(img, box):
+    if isinstance(img, np.ndarray):
+        img = img.copy()
+    elif isinstance(img, torch.Tensor):
+        img = img.cpu().detach().numpy()
+        transform = transforms.Compose([transforms.ToImage(), transforms.ToDtype(torch.uint8)])
+        img = transform(img)
+    if isinstance(box, np.ndarray):
+        box = box.copy()
+    else:
+        box = box.detach().cpu().numpy()
+    img_width = img.shape[1]
+    img_height = img.shape[0]
+    box[..., 1] = 1 - box[..., 1]
+    box[...,0]*=img_width
+    box[...,1]*=img_height
+    box = box.astype(np.int32)
+    for b in box:
+        cv.line(img, b[0], b[1], (0, 0, 255), 2)
     return img
 
 

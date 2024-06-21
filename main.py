@@ -2,7 +2,7 @@
 import config
 from Model import *
 from vit import Transformer
-
+from scipy.spatial.distance import cdist
 
 class DoubleLineFormalDataset(Datasetbehaviour):
     def __init__(self, size, total_output, line_num):
@@ -211,29 +211,72 @@ class DoubleLineFormalDataset(Datasetbehaviour):
                 return img, target, meta
             except StopExecution:
                 pass
+class FormalDataset(Datasetbehaviour):
+    def __init__(self, size=None):
+        self.dataset_folder = Path("dataset/pkl")
+        self.dataset_list = list(self.dataset_folder.iterdir())
+        if size is None:
+            size = len(self.dataset_list)
+        self.dataset_list = self.dataset_list[:size]
+        self.i=0
+        super().__init__(size, self.__create)
 
+    def __create(self):
+        path = self.dataset_list[self.i]
+        data = pickle.load(open(path, "rb"))
+        img  = cv.imread("dataset/images/"+Path(path).stem + ".jpg")
+        for net, prop in data.items():
+            prop = np.array(prop).round(4).reshape(-1,2,2)
+            prop = np.round(prop, 3)
+            for p in prop:
+                if p[0,0] != p[1,0] and p[0,1] != p[1,1]:
+                    p[0,1] = p[1,1]
+            new_points = union_all([LineString(p) for p in prop])
+            if isinstance(new_points, MultiLineString):
+                new_points = ops.linemerge(new_points).simplify(0.001)
+            new_props=[]
+            for geom in new_points.geoms if isinstance(new_points, MultiLineString) else [new_points]:
+                line_coord = shapely.get_coordinates(geom)
+                new_props.append([(line_coord[i],line_coord[i+1]) for i in range(len(line_coord)-1)])
+            data[net] = np.vstack(new_props)
 
-data_size = config.DATA_NUM
-if data_size > 10000:
-    Datasetbehaviour.MP = True
-dataset_guise = DoubleLineFormalDataset(data_size, total_output=3, line_num=2)
-result_num = 18
+        points = list(chain.from_iterable(data.values()))
+        points = np.array(points).reshape(-1,2)
+        points = np.unique(points,axis=0)
+        self.i+=1
+        return img, points
+
+Datasetbehaviour.MP = False
+dataset_guise = FormalDataset()
+result_num = 120
+
+#%%
+# for max_ele in random.choices(L, k=10):
+#     path =max_ele[1]
+#     points = max_ele[2]
+#     img  = cv.imread("dataset/images/"+path.stem + ".jpg")
+#     img = draw_point(img, points,width=2)
+#     plot_images([img], img_width=600)
+    # print(points)
+    # print(path)
+    # print(len(points))
+
 # %%
 if config.EVAL:
     for i in range(3):
-        # plot_images(draw_point(dataset_guise[i][0], dataset_guise[i][1]))
-        plot_images(dataset_guise[i][0])
+        plot_images(draw_point(dataset_guise[i][0], dataset_guise[i][1]),img_width=600)
+        plot_images(dataset_guise[i][0],img_width=600)
     dataset_guise.view()
 # %%
-
-xtransform = transforms.Compose(
-    [
-        transforms.ToImage(),
-        transforms.Grayscale(),
-        transforms.ToDtype(torch.float32, scale=True),
-    ]
-)
-
+def xtransform(x):
+    x = reshape_to_square(x,700)
+    return transforms.Compose(
+        [
+            transforms.ToImage(),
+            transforms.Grayscale(),
+            transforms.ToDtype(torch.float32, scale=True),
+        ]
+    )(x)
 
 def ytransform(x):
     s = np.full((result_num, 2), -1, dtype=np.float32)
@@ -242,7 +285,7 @@ def ytransform(x):
 
 
 model = Model(
-    "FindPoints",
+    "FormalDataset",
     dataset_guise,
     xtransform=xtransform,
     ytransform=ytransform,
@@ -251,7 +294,7 @@ model = Model(
     batch_size=config.BATCH_SIZE,
     # memory_fraction=0.5,
 )
-model.view()
+# model.view()
 # %%
 # from torchmetrics.detection import CompleteIntersectionOverUnion
 
@@ -398,7 +441,7 @@ def Hungarian_Order(g1b, g2b):
     return indices
 
 
-stage = 1
+stage = 0
 
 
 def criterion(y_hat, y, meta):
@@ -499,11 +542,10 @@ model.fit(
     m,
     criterion,
     optim.AdamW(m.parameters(), lr=config.LEARNING_RATE),
-    3000,
+    5000,
     pretrained_path=config.PRETRAINED_PATH,
     keep=not config.EVAL,
     backprop_freq=config.BATCH_STEP,
-    start_epoch=2074,
 )
 # %%
 # Datasetbehaviour.RESET = True
