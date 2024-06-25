@@ -161,3 +161,8 @@ runs/FindPoints/0603_17-37-46__decoder/best.pth filter=lfs diff=lfs merge=lfs -t
 runs/FindPoints/0531_14-42-35__decoder/best.pth filter=lfs diff=lfs merge=lfs -text
 runs/FindPoints/0529_22-03-47__decoder/best.pth filter=lfs diff=lfs merge=lfs -text
 runs/FindPoints/0603_10-35-06__decoder/best.pth filter=lfs diff=lfs merge=lfs -text
+custom_datasets/FormalDataset/FormalDataset_be85d76850b355bca3b53f78f85ec1fcd5ca7bb257bc81ed09634100b9d9f897.pkl filter=lfs diff=lfs merge=lfs -text
+custom_datasets/FormalDataset/FormalDataset_b4c135159e7c71b39032f7e3f7d8d35f3e0f3c9a71df00eba009e02bb10552cd.pkl filter=lfs diff=lfs merge=lfs -text
+custom_datasets/FormalDataset/cache/1e80391f275adbdd7c51daff4b0519a6d52296c056866b9ac34e5c44cc89a6b2 filter=lfs diff=lfs merge=lfs -text
+custom_datasets/FormalDataset/cache/1b19b5846dbba4d498b55846e8dceac8eae857177167dbee14228c357fab98a8 filter=lfs diff=lfs merge=lfs -text
+custom_datasets/FormalDataset/cache/be6cf54aa9d549a53cea6da5fa88f31d86c62260e21e03aba56311911f21e608 filter=lfs diff=lfs merge=lfs -text

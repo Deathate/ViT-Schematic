@@ -1,9 +1,9 @@
 # ViT-Schematic
-This project requires Python 3.11 and a set of dependencies specified in the `requirements.txt` file. Follow the instructions below to install Python, set up the environment, and run the `main.py` script.
+This project requires Python 3.10.14 and a set of dependencies specified in the `requirements.txt` file. Follow the instructions below to install Python, set up the environment, and run the `main.py` script.
 
 ## Prerequisites
 
-- Python 3.11: [Download and install Python 3.11] for your operating system.
+- Python 3.10.14: [Download and install Python 3.10.14] for your operating system.
 
 ## Installation
 1. Navigate to the project directory:
