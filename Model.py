@@ -63,7 +63,7 @@ from torchmetrics import Accuracy
 from torchmetrics.classification import MulticlassAccuracy
 from torchvision import models
 from torchvision.ops.boxes import complete_box_iou
-from tqdm.std import tqdm
+from tqdm import tqdm
 
 from utility import *
 from visualizer import get_local
