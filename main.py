@@ -247,7 +247,7 @@ class FormalDataset(Datasetbehaviour):
         return img, points
 
 Datasetbehaviour.MP = False
-dataset_guise = FormalDataset(1000)
+dataset_guise = FormalDataset()
 result_num = 120
 
 #%%
