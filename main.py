@@ -247,7 +247,7 @@ class FormalDataset(Datasetbehaviour):
         return img, points
 
 Datasetbehaviour.MP = False
-dataset_guise = FormalDataset()
+dataset_guise = FormalDataset(config.DATASET_SIZE)
 result_num = 120
 
 #%%

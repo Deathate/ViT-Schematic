@@ -7,6 +7,7 @@ TEST = False
 if EVAL:
     TEST = True
 LEARNING_RATE = 1e-4
+DATASET_SIZE = 35000
 BATCH_SIZE = 32
 BATCH_STEP = 128 / BATCH_SIZE
 # 使用amp後，一輪訓練時間為11.5分鐘
