@@ -1,5 +1,6 @@
 """From Bradley, Hax and Maganti, 'Applied Mathematical Programming', figure 8.1."""
-
+print(1)
+exit(0)
 import numpy as np
 import torch
 import pickle

@@ -1,0 +1,23 @@
+error_code:
+  錯誤代碼. 此值可以是函式回傳值, 或以 -1 代表發生錯誤, 0 代表無錯誤發生.
+  
+log_code:
+  E 表示錯誤, W 表示警告, N 表示正常, Q 表示統計資料.
+
+log_filename:
+  AP 程式的名稱. 此值由 AP 程式呼叫 mws_init() 時自行填入.
+
+log_program:
+  呼叫 write_to_log 函式記錄此筆 log 的程式.
+
+log_line_no:
+  呼叫 write_to_log 函式的程式行號.
+
+log_date:
+  呼叫 write_to_log 函式記錄此筆 log 的程式的日期, 格式為 YYYYMMDD.
+
+log_time:
+  呼叫 write_to_log 函式記錄此筆 log 的程式的時間, 格式為 HH:MM:SS.
+
+log_body:
+  此筆 log 的主體, 用於說明發生錯誤或回報程式運行狀況.

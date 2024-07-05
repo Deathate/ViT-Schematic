@@ -1,0 +1,8 @@
+MWS configuration file 規則
+"xx" 表示 變數種類
+1. event queue default section name: [default_event_queue_config_value]
+2. context default section name: [default_context_config_value]
+3. source default section name: [default_source_config_value]
+4. receiver default section name: [default_receiver_config_value]
+5. source section name 規則: [SRC_"主機名"_"程式名""_組號(非必要)"_"TOPIC NAME"]
+6. receiver section name 規則: [RCV_"主機名"_"程式名""_組號(非必要)"_"TOPIC NAME"]

@@ -8,7 +8,7 @@ class DoubleLineFormalDataset(Datasetbehaviour):
     def __init__(self, size, total_output, line_num):
         super().__init__(size, self.__create, total_output, line_num)
 
-    def __create(self, total_output, line_num):
+    # def __create(self, total_output, line_num):
         width = 20
         total_output = random.randint(1, total_output)
 
@@ -546,6 +546,7 @@ model.fit(
     pretrained_path=config.PRETRAINED_PATH,
     keep=not config.EVAL,
     backprop_freq=config.BATCH_STEP,
+    device_ids=config.DEVICE_IDS,
 )
 # %%
 # Datasetbehaviour.RESET = True

@@ -348,7 +348,9 @@ class Model:
         pretrained_path=None,
         keep=True,
         backprop_freq=1,
+        device_ids=[0],
     ):
+        os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, device_ids))
         backprop_freq = int(backprop_freq)
         if pretrained_path:
             print("** [Pretrained model loaded]")
@@ -367,6 +369,8 @@ class Model:
                     print(f"** [Optimizer learning rate changed to {lr}]")
                     optimizer.param_groups[0]["lr"] = lr
         else:
+            if len(device_ids) > 1:
+                model = nn.DataParallel(model, device_ids=list(range(len(device_ids))))
             self.model = model.cuda()
         # accelerate training speed
         if compile:
@@ -400,7 +404,7 @@ class Model:
             Meta_data = namedtuple("Meta_data", ["data", "model"])
 
             def create_meta(seq):
-                return Meta_data([DataCell(*self.data[s]) for s in seq], self.model)
+                return Meta_data([DataCell(*self.data[s]) for s in seq], self.model if len(device_ids) == 1 else self.model.module)
 
             for ep in range(start, end):
                 with tqdm(
