@@ -28,7 +28,6 @@ from pprint import pprint
 from typing import Annotated
 
 import cv2
-import cv2 as cv
 import einops
 import ipyplot
 import IPython
@@ -349,29 +348,33 @@ class Model:
         keep=True,
         backprop_freq=1,
         device_ids=[0],
+        keep_epoch=True,
     ):
         os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, device_ids))
         backprop_freq = int(backprop_freq)
-        if pretrained_path:
+        previous_epoch = 0
+        if pretrained_path != "":
             print("** [Pretrained model loaded]")
             checkpoint = torch.load(pretrained_path)
             if isinstance(checkpoint, OrderedDict):
                 model.load_state_dict(checkpoint, strict=False)
-                self.model = model.cuda()
+                model = self.parallel(model, device_ids)
             else:
                 lr = optimizer.param_groups[0]["lr"]
                 # it is recommended to move a model to GPU before constructing an optimizer
                 model.load_state_dict(checkpoint["model"], strict=False)
-                self.model = model.cuda()
+                model = self.parallel(model, device_ids)
                 print("** [Pretrained optimizer loaded]")
                 optimizer.load_state_dict(checkpoint["optimizer"])
                 if optimizer.param_groups[0]["lr"] != lr:
                     print(f"** [Optimizer learning rate changed to {lr}]")
                     optimizer.param_groups[0]["lr"] = lr
+                if checkpoint.get("epoch", False) and keep_epoch:
+                    previous_epoch = checkpoint["epoch"] - 1
+
         else:
-            if len(device_ids) > 1:
-                model = nn.DataParallel(model, device_ids=list(range(len(device_ids))))
-            self.model = model.cuda()
+            model = self.parallel(model, device_ids)
+        self.model = model
         # accelerate training speed
         if compile:
             self.model = torch.compile(self.model, mode="reduce-overhead")
@@ -404,9 +407,12 @@ class Model:
             Meta_data = namedtuple("Meta_data", ["data", "model"])
 
             def create_meta(seq):
-                return Meta_data([DataCell(*self.data[s]) for s in seq], self.model if len(device_ids) == 1 else self.model.module)
+                return Meta_data(
+                    [DataCell(*self.data[s]) for s in seq],
+                    self.model if len(device_ids) == 1 else self.model.module,
+                )
 
-            for ep in range(start, end):
+            for ep in range(start + previous_epoch, end):
                 with tqdm(
                     total=len(self.train_loader) // backprop_freq,
                     bar_format="{desc}{n_fmt}/{total_fmt}|{bar}| - {elapsed}s{postfix}",
@@ -520,15 +526,22 @@ class Model:
                         )
                     val_loss = torch.stack(val_loss).mean()
                     self.writer.add_scalar("Loss/validation", val_loss, ep + 1)
-                    if val_loss < best_quantity:
+                    if val_loss <= best_quantity:
                         best_quantity = val_loss
+                        saved_path = Path(self.writer.log_dir) / "best.pth"
                         torch.save(
                             {
-                                "model": self.model.state_dict(),
+                                "model": (
+                                    self.model.state_dict()
+                                    if len(device_ids) == 1
+                                    else self.model.module.state_dict()
+                                ),
                                 "optimizer": optimizer.state_dict(),
+                                "epoch": ep,
                             },
-                            Path(self.writer.log_dir) / "best.pth",
+                            saved_path,
                         )
+                        pbar.write(f"Found better solution at epoch {ep}, saved to \"{saved_path}\"")
                     # self.writer.add_scalars('Loss', {'validation': val_loss,
                     #                                  'train': train_loss}, ep + 1)
                     pbar.set_postfix({"loss": f"{train_loss:.3E}", "acc": f"{val_loss:.3E}"})
@@ -553,6 +566,12 @@ class Model:
         self.total_time += end_time - start_time
         print("----------- Training finished -----------")
         print()
+
+    def parallel(self, model, device_ids):
+        if len(device_ids) > 1:
+            return nn.DataParallel(model, device_ids=list(range(len(device_ids)))).cuda()
+        else:
+            return model.cuda()
 
     @torch.no_grad()
     def predict(self, data: torch.tensor, target: torch.tensor):
@@ -891,7 +910,7 @@ def reshape_to_square(image, desired_size, color=(255, 255, 255), verbose=False)
         old_image_width, old_image_height = int(desired_size * ratio), desired_size
     else:
         old_image_width, old_image_height = desired_size, int(desired_size / ratio)
-    image = cv.resize(image, (old_image_height, old_image_width))
+    image = cv2.resize(image, (old_image_height, old_image_width))
 
     # create new image of desired size and color (blue) for padding
     result = np.full((desired_size, desired_size, channels), color, dtype=np.uint8)
@@ -934,12 +953,14 @@ def draw_point(img, box, width=4):
     img_width = img.shape[1]
     img_height = img.shape[0]
     box[..., 1] = 1 - box[..., 1]
-    box[...,0]*=img_width
-    box[...,1]*=img_height
+    box[..., 0] *= img_width
+    box[..., 1] *= img_height
     box = box.astype(np.int32)
     for b in box:
-        cv.circle(img, (b[0], b[1]), width, (0, 255, 0), -1)
+        cv2.circle(img, (b[0], b[1]), width, (0, 255, 0), -1)
     return img
+
+
 def draw_line(img, box):
     if isinstance(img, np.ndarray):
         img = img.copy()
@@ -954,8 +975,8 @@ def draw_line(img, box):
     img_width = img.shape[1]
     img_height = img.shape[0]
     box[..., 1] = 1 - box[..., 1]
-    box[...,0]*=img_width
-    box[...,1]*=img_height
+    box[..., 0] *= img_width
+    box[..., 1] *= img_height
     box = box.astype(np.int32)
     for b in box:
         cv.line(img, b[0], b[1], (0, 0, 255), 2)

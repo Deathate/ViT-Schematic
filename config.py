@@ -1,12 +1,14 @@
 PRETRAINED_PATH = "complete/complex_detr/best.pth"
 PRETRAINED_PATH = "runs/FindPoints/0603_10-35-06__decoder/best.pth"
-PRETRAINED_PATH = ""
+PRETRAINED_PATH = "runs/FormalDataset/0708_12-15-40__decoder/best.pth"
+KEEP_EPOCH = True
 EVAL = False
 TEST = False
 if EVAL:
     TEST = True
 LEARNING_RATE = 1e-4
-DATASET_SIZE = 200
+EPOCHS = 5000
+DATASET_SIZE = 20000
 BATCH_SIZE = 32
 BATCH_STEP = 128 / BATCH_SIZE
-DEVICE_IDS=[0,1]
+DEVICE_IDS = [0]
