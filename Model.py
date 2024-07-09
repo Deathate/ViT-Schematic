@@ -1,4 +1,5 @@
 import collections.abc as abc
+import glob
 import copy
 import datetime
 import gc
@@ -273,12 +274,10 @@ class Model:
         self.writer = None
         torch.set_float32_matmul_precision("high")
 
-    def tensorboard_setting(self, parent, name):
+    def tensorboard_setting(self):
         if self.writer:
             self.writer.close()
-        now = datetime.datetime.now()
-        logdir = f"runs/{parent}/" + now.strftime("%m%d_%H-%M-%S") + "_" + name + "/"
-        self.writer = SummaryWriter(comment=name, log_dir=logdir)
+        self.writer = SummaryWriter(comment="", log_dir=self.log_dir)
         layout = {
             "metrics": {
                 "loss": ["Multiline", ["Loss/train"]],
@@ -350,11 +349,22 @@ class Model:
         device_ids=[0],
         keep_epoch=True,
     ):
+        now = datetime.datetime.now()
+        self.log_dir = Path(
+            f"runs/{self.name}/" + now.strftime("%m%d_%H-%M-%S") + "_" + self.suffix + "/"
+        )
         os.environ["CUDA_VISIBLE_DEVICES"] = ",".join(map(str, device_ids))
         backprop_freq = int(backprop_freq)
         previous_epoch = 0
+        list_of_files = glob.glob(str(self.log_dir.parent) + "/*")
+        if pretrained_path == "latest":
+            if len(list_of_files) == 0:
+                pretrained_path = ""
+            else:
+                latest_file = max(list_of_files, key=os.path.getctime)
+                pretrained_path = latest_file + "/latest.pth"
         if pretrained_path != "":
-            print("** [Pretrained model loaded]")
+            print(f"** [Pretrained model loaded] - \"{pretrained_path}\"")
             checkpoint = torch.load(pretrained_path)
             if isinstance(checkpoint, OrderedDict):
                 model.load_state_dict(checkpoint, strict=False)
@@ -383,7 +393,7 @@ class Model:
         if id(model) != self.model_id:
             self.model_id = id(model)
             self.gc()
-            self.tensorboard_setting(self.name, self.suffix)
+            self.tensorboard_setting()
             shutil.copy(inspect.getfile(self.model.__class__), Path(self.writer.log_dir))
             self.model_overview(self.model)
             print(f"Model: {self.model.__class__.__name__}, ID:{self.model_id}")
@@ -413,6 +423,21 @@ class Model:
                 )
 
             for ep in range(start + previous_epoch, end):
+
+                def save_model(path):
+                    torch.save(
+                        {
+                            "model": (
+                                self.model.state_dict()
+                                if len(device_ids) == 1
+                                else self.model.module.state_dict()
+                            ),
+                            "optimizer": optimizer.state_dict(),
+                            "epoch": ep,
+                        },
+                        path,
+                    )
+
                 with tqdm(
                     total=len(self.train_loader) // backprop_freq,
                     bar_format="{desc}{n_fmt}/{total_fmt}|{bar}| - {elapsed}s{postfix}",
@@ -501,7 +526,7 @@ class Model:
                         except:
                             pass
                         print("Removing log directory")
-                        shutil.rmtree(self.writer.log_dir)
+                        shutil.rmtree(self.log_dir)
                         raise e
 
                     train_loss = np.mean(train_loss)
@@ -528,20 +553,11 @@ class Model:
                     self.writer.add_scalar("Loss/validation", val_loss, ep + 1)
                     if val_loss <= best_quantity:
                         best_quantity = val_loss
-                        saved_path = Path(self.writer.log_dir) / "best.pth"
-                        torch.save(
-                            {
-                                "model": (
-                                    self.model.state_dict()
-                                    if len(device_ids) == 1
-                                    else self.model.module.state_dict()
-                                ),
-                                "optimizer": optimizer.state_dict(),
-                                "epoch": ep,
-                            },
-                            saved_path,
-                        )
-                        pbar.write(f"Found better solution at epoch {ep}, saved to \"{saved_path}\"")
+                        saved_path = Path(self.log_dir) / "best.pth"
+                        save_model(saved_path)
+                        pbar.write(f'Found better solution at epoch {ep}, saved to "{saved_path}"')
+                    latest_path = Path(self.log_dir) / "latest.pth"
+                    save_model(latest_path)
                     # self.writer.add_scalars('Loss', {'validation': val_loss,
                     #                                  'train': train_loss}, ep + 1)
                     pbar.set_postfix({"loss": f"{train_loss:.3E}", "acc": f"{val_loss:.3E}"})
@@ -979,7 +995,7 @@ def draw_line(img, box):
     box[..., 1] *= img_height
     box = box.astype(np.int32)
     for b in box:
-        cv.line(img, b[0], b[1], (0, 0, 255), 2)
+        cv2.line(img, b[0], b[1], (0, 0, 255), 2)
     return img
 
 
