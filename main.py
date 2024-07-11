@@ -224,37 +224,52 @@ class FormalDataset(Datasetbehaviour):
         self.i = 0
         super().__init__(size, self.__create)
 
+    def tidyup_line(self, prop):
+        # prop is the list of line segments, such as [[a,b,c,d],[...]], (a,b) is the start point, (c,d) is the end point
+        tidy = False
+        prop = np.array(prop).round(4).reshape(-1, 2, 2)
+        for p in prop:
+            if p[0, 0] != p[1, 0] and p[0, 1] != p[1, 1]:
+                p[0, 1] = p[1, 1]
+                tidy = True
+
+        # return prop, tidy
+        new_points = union_all([LineString(p) for p in prop])
+        if isinstance(new_points, MultiLineString):
+            new_points = ops.linemerge(new_points)
+        new_props = []
+        for geom in new_points.geoms if isinstance(new_points, MultiLineString) else [new_points]:
+            line_coord = shapely.get_coordinates(geom)
+            new_props.append(
+                [(line_coord[i], line_coord[i + 1]) for i in range(len(line_coord) - 1)]
+            )
+        new_props = np.vstack(new_props)
+        return new_props, tidy
+
     def __create(self):
         path = self.dataset_list[self.i]
         data = pickle.load(open(path, "rb"))
         img = cv2.imread("dataset/images/" + Path(path).stem + ".jpg")
+        data_bk = data.copy()
         for net, prop in data.items():
-            prop = np.array(prop).round(4).reshape(-1, 2, 2)
-            prop = np.round(prop, 3)
-            for p in prop:
-                if p[0, 0] != p[1, 0] and p[0, 1] != p[1, 1]:
-                    p[0, 1] = p[1, 1]
-            new_points = union_all([LineString(p) for p in prop])
-            if isinstance(new_points, MultiLineString):
-                new_points = ops.linemerge(new_points).simplify(0.001)
-            new_props = []
-            for geom in (
-                new_points.geoms if isinstance(new_points, MultiLineString) else [new_points]
-            ):
-                line_coord = shapely.get_coordinates(geom)
-                new_props.append(
-                    [(line_coord[i], line_coord[i + 1]) for i in range(len(line_coord) - 1)]
-                )
-            data[net] = np.vstack(new_props)
-
-        points = list(chain.from_iterable(data.values()))
-        points = np.array(points).reshape(-1, 2)
+            data[net], tidy = self.tidyup_line(prop)
+        lines = []
+        for net, prop in data.items():
+            line = np.array(prop).reshape(-1, 2, 2)
+            lines.append(line)
+        ori_points = np.vstack(list(data_bk.values())).reshape(-1, 2)
+        # ori_points = np.unique(ori_points, axis=0)
+        points = np.vstack(list(data.values())).reshape(-1, 2)
         points = np.unique(points, axis=0)
+        # plot_images(draw_line(img, lines[1]), img_width=600)
+        # plot_images(draw_point(img, points), img_width=600)
+        # raise
         self.i += 1
         return img, points
 
 
 Datasetbehaviour.MP = False
+Datasetbehaviour.RESET = True
 dataset_guise = FormalDataset(config.DATASET_SIZE)
 result_num = 120
 

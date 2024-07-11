@@ -976,7 +976,12 @@ def draw_point(img, box, width=4):
         cv2.circle(img, (b[0], b[1]), width, (0, 255, 0), -1)
     return img
 
-
+def draw_lines(img, lines):
+    if isinstance(img, np.ndarray):
+        img = img.copy()
+    for line in lines:
+        img = draw_line(img, line)
+    return img
 def draw_line(img, box):
     if isinstance(img, np.ndarray):
         img = img.copy()
@@ -986,8 +991,10 @@ def draw_line(img, box):
         img = transform(img)
     if isinstance(box, np.ndarray):
         box = box.copy()
-    else:
+    elif isinstance(box, torch.Tensor):
         box = box.detach().cpu().numpy()
+    else:
+        box = np.array(box)
     img_width = img.shape[1]
     img_height = img.shape[0]
     box[..., 1] = 1 - box[..., 1]
