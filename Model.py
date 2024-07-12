@@ -337,6 +337,7 @@ class Model:
         criterion,
         optimizer,
         epochs=1,
+        max_epochs=99999,
         start_epoch=None,
         compile=False,
         target_transform=lambda y_hat, y: y,
@@ -363,8 +364,10 @@ class Model:
             else:
                 latest_file = max(list_of_files, key=os.path.getctime)
                 pretrained_path = latest_file + "/latest.pth"
+                if not Path(pretrained_path).exists():
+                    pretrained_path = ""
         if pretrained_path != "":
-            print(f"** [Pretrained model loaded] - \"{pretrained_path}\"")
+            print(f'** [Pretrained model loaded] - "{pretrained_path}"')
             checkpoint = torch.load(pretrained_path)
             if isinstance(checkpoint, OrderedDict):
                 model.load_state_dict(checkpoint, strict=False)
@@ -380,7 +383,7 @@ class Model:
                     print(f"** [Optimizer learning rate changed to {lr}]")
                     optimizer.param_groups[0]["lr"] = lr
                 if checkpoint.get("epoch", False) and keep_epoch:
-                    previous_epoch = checkpoint["epoch"] - 1
+                    previous_epoch = checkpoint["epoch"] + 1
 
         else:
             model = self.parallel(model, device_ids)
@@ -406,7 +409,9 @@ class Model:
             if start_epoch is not None:
                 self.ep = start_epoch
             start = self.ep
-            end = epochs
+            if isinstance(max_epochs, int):
+                max_epochs = int(max_epochs)
+            end = min(max_epochs, start + previous_epoch + epochs)
 
             if self.amp:
                 scaler = torch.cuda.amp.GradScaler()
@@ -422,9 +427,9 @@ class Model:
                     self.model if len(device_ids) == 1 else self.model.module,
                 )
 
-            for ep in range(start + previous_epoch, end):
+            for ep in range(start + previous_epoch, min(end, start + previous_epoch + epochs)):
 
-                def save_model(path):
+                def save_model(path, log=False):
                     torch.save(
                         {
                             "model": (
@@ -437,12 +442,14 @@ class Model:
                         },
                         path,
                     )
+                    if log:
+                        pbar.write(f'Saved to "{path}".')
 
                 with tqdm(
                     total=len(self.train_loader) // backprop_freq,
                     bar_format="{desc}{n_fmt}/{total_fmt}|{bar}| - {elapsed}s{postfix}",
                 ) as pbar:
-                    pbar.set_description(f"Epoch {ep+1}/{end}")
+                    pbar.set_description(f"Epoch {ep+1}/{end} ({max_epochs})")
                     train_loss = []
                     pbar.set_postfix({"loss": "---", "acc": "---"})
 
@@ -551,16 +558,18 @@ class Model:
                         )
                     val_loss = torch.stack(val_loss).mean()
                     self.writer.add_scalar("Loss/validation", val_loss, ep + 1)
-                    if val_loss <= best_quantity:
-                        best_quantity = val_loss
-                        saved_path = Path(self.log_dir) / "best.pth"
-                        save_model(saved_path)
-                        pbar.write(f'Found better solution at epoch {ep}, saved to "{saved_path}"')
                     latest_path = Path(self.log_dir) / "latest.pth"
                     save_model(latest_path)
                     # self.writer.add_scalars('Loss', {'validation': val_loss,
                     #                                  'train': train_loss}, ep + 1)
                     pbar.set_postfix({"loss": f"{train_loss:.3E}", "acc": f"{val_loss:.3E}"})
+                    if val_loss <= best_quantity:
+                        best_quantity = val_loss
+                        saved_path = Path(self.log_dir) / "best.pth"
+                        save_model(saved_path)
+                        pbar.write(
+                            f'Found a better solution at epoch {ep+1}. Saved to "{saved_path}".'
+                        )
                     # scheduler.step(val_loss)
                     self.writer.add_scalar("lr", optimizer.param_groups[0]["lr"], ep + 1)
                     if early_stopping:
@@ -573,7 +582,7 @@ class Model:
         except KeyboardInterrupt:
             print("Keyboard interrupt received.")
             self.interrupt = True
-            if ep < 10:
+            if ep < 5:
                 print("Removing log directory")
                 shutil.rmtree(self.writer.log_dir)
 
@@ -976,12 +985,15 @@ def draw_point(img, box, width=4):
         cv2.circle(img, (b[0], b[1]), width, (0, 255, 0), -1)
     return img
 
+
 def draw_lines(img, lines):
     if isinstance(img, np.ndarray):
         img = img.copy()
     for line in lines:
         img = draw_line(img, line)
     return img
+
+
 def draw_line(img, box):
     if isinstance(img, np.ndarray):
         img = img.copy()
