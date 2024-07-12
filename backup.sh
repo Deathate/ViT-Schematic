@@ -7,6 +7,6 @@ cp .gitignore .gitignore.bak
 find * -size +99M | cat >> .gitignore
 git add -A
 git commit -m "Auto commit $(date +%H/%M/%m/%d/%Y)"
-git push
+git push -f
 mv .gitignore .gitignore_full
 mv .gitignore.bak .gitignore
