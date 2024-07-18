@@ -316,7 +316,7 @@ class FormalDatasetWindowed(Datasetbehaviour):
     def __create(self):
         path = self.dataset_list[self.i]
         data = pickle.load(open(path, "rb"))
-        img = cv2.imread("dataset_windowed/images/" + Path(path).stem + ".png")
+        img = cv2.imread("dataset_windowed/images/" + Path(path).stem + ".png", cv2.IMREAD_UNCHANGED)
         img_height, img_width = img.shape[:2]
         for net, prop in data.items():
             prop = [x for x in prop if len(x) == 2 or (len(prop)==1 and len(x)==1)]
@@ -364,8 +364,11 @@ dataset_guise.view()
 #     plot_images(
 #         draw_point(dataset_guise[i][0], dataset_guise[i][1]), img_width=dataset_guise[i][0].shape[0]
 #     )
-result_num = 120
-
+print(dataset_guise.num_empty)
+# in 104755 images, 28353 of images is almost empty
+result_num = 0
+for x in dataset_guise:
+    result_num = max(x[1].shape[0], result_num)
 # %%
 # for max_ele in random.choices(L, k=10):
 #     path =max_ele[1]
@@ -387,14 +390,18 @@ if config.EVAL:
 
 # %%
 def xtransform(x):
-    x = reshape_to_square(x, 700)
-    return transforms.Compose(
+    gray_channel=transforms.Compose(
         [
             transforms.ToImage(),
             transforms.Grayscale(),
             transforms.ToDtype(torch.float32, scale=True),
         ]
-    )(x)
+    )(x[:, :, :3])
+    alpha_channel = x[:, :, -1] / 255
+    alpha_channel = alpha_channel[np.newaxis, :]
+    alpha_channel = torch.tensor(alpha_channel)
+    joint = torch.cat((gray_channel, alpha_channel), dim=0)
+    return joint
 
 
 def ytransform(x):
@@ -404,7 +411,7 @@ def ytransform(x):
 
 
 model = Model(
-    "FormalDataset",
+    "FormalDatasetWindowed",
     dataset_guise,
     xtransform=xtransform,
     ytransform=ytransform,
@@ -504,6 +511,7 @@ class ViT_ex(nn.Module):
         # )
 
     def forward(self, x, y):
+        x = x.to(torch.float32)
         x = self.to_patch_embedding(x)
 
         if self.style == "encoder":
@@ -645,14 +653,14 @@ style = "decoder"
 head_num = 8
 dim_head = 50
 m = ViT_ex(
-    image_size=200,
+    image_size=100,
     patch_size=10,
     dim=head_num * dim_head,
     depth=6,
     heads=head_num,
     dim_ff=head_num * dim_head,
     result_num=result_num,
-    channels=1,
+    channels=2,
     dropout=0,
     style=style,
 )

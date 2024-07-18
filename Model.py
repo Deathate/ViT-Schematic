@@ -110,12 +110,11 @@ class Datasetbehaviour:
         self.reset = Datasetbehaviour.RESET
         key = inspect.getsource(type(self)) + str(args) + str(kwargs) + str(size)
         filepath = self.__get_filepath(key)
-        print("** [Dataset creation]")
-        print("[Identify file path]:")
+        print("** [Create dataset]")
+        print("[Identify file path]")
         print(textwrap.fill(str(filepath), 70, initial_indent=" " * 4))
         self.filepath = str(filepath)
         self.__dataset = None
-        print("--- [finish creation] ---\n")
 
     def __get_filepath(self, key: str):
         class_name = type(self).__name__
@@ -126,7 +125,7 @@ class Datasetbehaviour:
         return parent / file
 
     def __load(self):
-        print("[dataset creation]")
+        print("[Load dataset]")
         print("- New:", Datasetbehaviour.RESET)
         print("- Multiple Processes:", Datasetbehaviour.MP)
         if Path(self.filepath).exists() and not Datasetbehaviour.RESET:
@@ -146,7 +145,7 @@ class Datasetbehaviour:
                 )
             self.__dataset = np.array(dataset, dtype=object)
             pickle.dump(self.__dataset, open(self.filepath, "wb"))
-        print("--- [finish creation] ---\n")
+        print("--- [Loading done] ---\n")
         Datasetbehaviour.reset()
 
     def __getitem__(self, idx):
