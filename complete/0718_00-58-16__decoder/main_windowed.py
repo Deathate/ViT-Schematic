@@ -383,8 +383,8 @@ for x in dataset_guise:
 # %%
 if config.EVAL:
     for i in range(3):
-        plot_images(draw_point(dataset_guise[i][0], dataset_guise[i][1]), img_width=100)
-        plot_images(dataset_guise[i][0], img_width=100)
+        plot_images(draw_point(dataset_guise[i][0], dataset_guise[i][1]), img_width=600)
+        plot_images(dataset_guise[i][0], img_width=600)
     dataset_guise.view()
 
 
@@ -418,7 +418,6 @@ model = Model(
     amp=True,
     cudnn=False,
     batch_size=config.BATCH_SIZE,
-    eval = config.EVAL,
     # memory_fraction=0.5,
 )
 # model.view()
@@ -577,21 +576,11 @@ def criterion(y_hat, y, meta):
     predicted_box, predicted_label_logit = box_head_result[:, :, :2], box_head_result[:, :, 2]
     predicted_label = torch.sigmoid(predicted_label_logit) < 0.5
     Hungarian_Order(predicted_box, y)
-    gtruth_label = y[:, :, 0] >= 0
-    valid_label = gtruth_label.any(dim=1)
+    gtruth_label = y[:, :, 0] > 0
     gtruth_label = gtruth_label.to(torch.float32)
     predicted_box[predicted_label] = y[predicted_label].to(predicted_box.dtype)
 
-    empty_weight = 0.1
-    loss_box = 0
-    for i in range(len(y)):
-        value = F.smooth_l1_loss(predicted_box[i], y[i])
-        if valid_label[i]:
-            loss_box += value
-        else:
-            loss_box += empty_weight * value
-    loss_box = loss_box / len(y)
-    # loss_box = F.smooth_l1_loss(predicted_box, y)
+    loss_box = F.smooth_l1_loss(predicted_box, y)
     loss_class = F.binary_cross_entropy_with_logits(predicted_label_logit, gtruth_label)
     if stage == 0:
         return 3 * loss_box + loss_class
@@ -672,7 +661,7 @@ m = ViT_ex(
     dim_ff=head_num * dim_head,
     result_num=result_num,
     channels=2,
-    dropout=config.DROPOUT,
+    dropout=0,
     style=style,
 )
 model.suffix = "_" + style
@@ -688,42 +677,41 @@ model.fit(
     device_ids=config.DEVICE_IDS,
     keep_epoch=config.KEEP_EPOCH,
 )
+exit()
 # %%
 # Datasetbehaviour.RESET = True
-if config.EVAL:
-    dataset_test = FormalDatasetWindowed(10)
-    result = model.inference(dataset_test)
+dataset_test = DoubleLineFormalDataset(10, total_output=3, line_num=2)
+result = model.inference(dataset_test)
 
-    # print(model.model.box_head(result[0][1][:4]))
-    # print(model.model.relation_head(torch.cat((result[0][1][0], result[0][1][1], result[0][1][-1]))))
-    canvas = []
-    for i, d in enumerate(dataset_test):
-        image = dataset_test[i][0]
-        image_bk = image.copy()
-        image_bk = draw_point(image_bk, dataset_test[i][1])
-        image_line = image.copy()
-        latent = result[i][1]
-        box_latent = model.model.box_head(latent[:result_num])
-        box = box_latent[:, :2]
-        classes = F.sigmoid(box_latent[:, 2]) > 0.5
-        box[~classes] = 0
-        image = draw_point(image, box)
-        # for a, b in itertools.combinations(latent[:result_num], 2):
-        #     relations = model.model.relation_heads(torch.cat((a, b, latent[-1])))
-        #     if F.sigmoid(relations) > 0.5:
-        #         p1 = model.model.box_head(a).detach().cpu()
-        #         p2 = model.model.box_head(b).detach().cpu()
-        #         if F.sigmoid(p1[2]) > 0.5 and F.sigmoid(p2[2]) > 0.5:
-        #             p1_pos, p2_pos = p1[:2].numpy(), p2[:2].numpy()
-        #             p1_pos[1] = 1 - p1_pos[1]
-        #             p2_pos[1] = 1 - p2_pos[1]
-        #             p1_pos *= 200
-        #             p2_pos *= 200
-        #             p1_pos = p1_pos.astype(int)
-        #             p2_pos = p2_pos.astype(int)
-        #             color = random.choice([(255, 0, 0), (0, 255, 0), (0, 0, 255)])
-        #             cv2.line(image_line, p1_pos, p2_pos, color=(0, 0, 255), thickness=2)
-        # attention_map = get_local.cache["Attention.forward"][0][i][0][0][:25].reshape(5, 5)
-        canvas.append([image_bk, image, image_line])
-    visualize_attentions(canvas)
-    # pprint(result)
+# print(model.model.box_head(result[0][1][:4]))
+# print(model.model.relation_head(torch.cat((result[0][1][0], result[0][1][1], result[0][1][-1]))))
+canvas = []
+for i, d in enumerate(dataset_test):
+    image = dataset_test[i][0]
+    image_bk = image.copy()
+    image_line = image.copy()
+    latent = result[i][1]
+    box_latent = model.model.box_head(latent[:result_num])
+    box = box_latent[:, :2]
+    classes = F.sigmoid(box_latent[:, 2]) > 0.5
+    box[~classes] = 0
+    image = draw_point(image, box)
+    for a, b in itertools.combinations(latent[:result_num], 2):
+        relations = model.model.relation_heads(torch.cat((a, b, latent[-1])))
+        if F.sigmoid(relations) > 0.5:
+            p1 = model.model.box_head(a).detach().cpu()
+            p2 = model.model.box_head(b).detach().cpu()
+            if F.sigmoid(p1[2]) > 0.5 and F.sigmoid(p2[2]) > 0.5:
+                p1_pos, p2_pos = p1[:2].numpy(), p2[:2].numpy()
+                p1_pos[1] = 1 - p1_pos[1]
+                p2_pos[1] = 1 - p2_pos[1]
+                p1_pos *= 200
+                p2_pos *= 200
+                p1_pos = p1_pos.astype(int)
+                p2_pos = p2_pos.astype(int)
+                color = random.choice([(255, 0, 0), (0, 255, 0), (0, 0, 255)])
+                cv2.line(image_line, p1_pos, p2_pos, color=(0, 0, 255), thickness=2)
+    # attention_map = get_local.cache["Attention.forward"][0][i][0][0][:25].reshape(5, 5)
+    canvas.append([image_bk, image, image_line])
+visualize_attentions(canvas)
+# pprint(result)

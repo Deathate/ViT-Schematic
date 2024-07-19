@@ -1,13 +1,12 @@
 import collections.abc as abc
-import glob
 import copy
 import datetime
 import gc
+import glob
 import hashlib
 import inspect
 import io
 import itertools
-from itertools import chain
 import json
 import logging
 import math
@@ -23,7 +22,7 @@ from collections import OrderedDict, namedtuple
 from dataclasses import dataclass
 from functools import partial
 from inspect import signature
-from itertools import count
+from itertools import chain, count
 from pathlib import Path
 from pprint import pprint
 from typing import Annotated
@@ -229,6 +228,7 @@ class Model:
         cudalize=True,
         use_cache=True,
         memory_fraction=1,
+        eval=False,
     ):
         if memory_fraction < 1:
             torch.cuda.set_per_process_memory_fraction(memory_fraction)
@@ -245,32 +245,33 @@ class Model:
         # torch.set_default_device('cuda')
         self.cudalize = cudalize
         self.data = data
-        self.dataset = self.preprocessing(data, use_cache, cudalize)
-        self.train_dataset, self.test_dataset = torch.utils.data.random_split(
-            self.dataset,
-            [tn := int(len(self.dataset) * (1 - validation_split)), len(self.dataset) - tn],
-        )
-        self.train_loader = DataLoader(
-            dataset=self.train_dataset,
-            batch_size=batch_size,
-            shuffle=shuffle,
-            # pin_memory=True,
-            # num_workers=os.cpu_count(),
-            # persistent_workers=True,
-        )
-        self.test_loader = DataLoader(
-            dataset=self.test_dataset,
-            batch_size=batch_size,
-            # pin_memory=True,
-            # num_workers=os.cpu_count(),
-            # persistent_workers=True,
-        )
+        if not eval:
+            self.dataset = self.preprocessing(data, use_cache, cudalize)
+            self.train_dataset, self.test_dataset = torch.utils.data.random_split(
+                self.dataset,
+                [tn := int(len(self.dataset) * (1 - validation_split)), len(self.dataset) - tn],
+            )
+            self.train_loader = DataLoader(
+                dataset=self.train_dataset,
+                batch_size=batch_size,
+                shuffle=shuffle,
+                # pin_memory=True,
+                # num_workers=os.cpu_count(),
+                # persistent_workers=True,
+            )
+            self.test_loader = DataLoader(
+                dataset=self.test_dataset,
+                batch_size=batch_size,
+                # pin_memory=True,
+                # num_workers=os.cpu_count(),
+                # persistent_workers=True,
+            )
         self.model = None
         self.model_id = None
 
         self.amp = amp
-        torch.backends.cudnn.benchmark = cudnn
         self.writer = None
+        torch.backends.cudnn.benchmark = cudnn
         torch.set_float32_matmul_precision("high")
 
     def tensorboard_setting(self):
