@@ -1,5 +1,6 @@
 import collections.abc as abc
 import copy
+import os
 import datetime
 import gc
 import glob
@@ -95,7 +96,9 @@ def select_gpu_with_most_free_memory():
 
 rng = np.random.default_rng()
 torch.manual_seed(0)
+os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
 torch.use_deterministic_algorithms(True)
+
 
 class DataCell(typing.NamedTuple):
     input: object

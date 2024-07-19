@@ -301,69 +301,8 @@ class FormalDataset(Datasetbehaviour):
         self.i += 1
         return img, points
 
-
-class FormalDatasetWindowed(Datasetbehaviour):
-    def __init__(self, size=None):
-        self.dataset_folder = Path("dataset_windowed/pkl")
-        self.dataset_list = list(self.dataset_folder.iterdir())
-        if size is None:
-            size = len(self.dataset_list)
-        self.dataset_list = self.dataset_list[:size]
-        self.i = 0
-        self.num_empty = 0
-        super().__init__(size, self.__create)
-
-    def __create(self):
-        path = self.dataset_list[self.i]
-        data = pickle.load(open(path, "rb"))
-        img = cv2.imread("dataset_windowed/images/" + Path(path).stem + ".png")
-        img_height, img_width = img.shape[:2]
-        for net, prop in data.items():
-            prop = [x for x in prop if len(x) == 2 or (len(prop)==1 and len(x)==1)]
-            try:
-                data[net] = np.array(prop).reshape(-1, 4).astype(np.float32).round(4)
-                data[net][:, [0, 2]] = data[net][:, [0, 2]] / img_width
-                data[net][:, [1, 3]] = data[net][:, [1, 3]] / img_height
-            except:
-                data[net] = np.array(prop).reshape(-1, 2).astype(np.float32).round(4)
-                data[net][:, 0] = data[net][:, 0] / img_width
-                data[net][:, 1] = data[net][:, 1] / img_height
-        lines = []
-        for net, prop in data.items():
-            try:
-                line = np.array(prop).reshape(-1, 2, 2)
-                lines.append(line)
-            except:
-                pass
-        for net, prop in data.items():
-            data[net] = np.array(data[net]).reshape(-1, 2)
-        points = np.vstack(list(data.values())).reshape(-1, 2)
-        points = np.unique(points, axis=0)
-
-        # if self.i == 3:
-        #     plot_images(img, img_width=img_width)
-        #     plot_images(draw_point(img, points), img_width=img_width)
-        #     plot_images(draw_lines(img, lines), img_width=img_width)
-        #     print(np.array(sorted(lines[0], key=lambda x: (x[0][0], x[1][0]))))
-        #     print(path)
-        #     print(len(points))
-        #     exit()
-        self.i += 1
-        if len(points) == 0:
-            self.num_empty += 1
-        return img, points
-
-
 Datasetbehaviour.MP = False
-# dataset_guise = FormalDataset(config.DATASET_SIZE)
-dataset_guise = FormalDatasetWindowed(config.DATASET_SIZE)
-dataset_guise.view()
-# print(dataset_guise.num_empty)
-# print(len(dataset_guise))
-# for i in range(10):
-#     plot_images(
-#         draw_point(dataset_guise[i][0], dataset_guise[i][1]), img_width=dataset_guise[i][0].shape[0]
-#     )
+dataset_guise = FormalDataset(config.DATASET_SIZE)
 result_num = 120
 
 # %%
