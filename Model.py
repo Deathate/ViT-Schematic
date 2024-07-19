@@ -94,7 +94,8 @@ def select_gpu_with_most_free_memory():
 
 
 rng = np.random.default_rng()
-
+torch.manual_seed(0)
+torch.use_deterministic_algorithms(True)
 
 class DataCell(typing.NamedTuple):
     input: object
