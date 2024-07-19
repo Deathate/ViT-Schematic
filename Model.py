@@ -95,10 +95,16 @@ def select_gpu_with_most_free_memory():
 
 
 rng = np.random.default_rng()
-torch.manual_seed(0)
-os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-torch.use_deterministic_algorithms(True)
-
+def set_seed(seed):
+    # os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+    # os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"
+    # torch.use_deterministic_algorithms(True)
+    torch.manual_seed(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    torch.backends.cudnn.enabled = False
 
 class DataCell(typing.NamedTuple):
     input: object
@@ -227,7 +233,6 @@ class Model:
         validation_split=0.1,
         shuffle=True,
         amp=True,
-        cudnn=True,
         suffix="",
         cudalize=True,
         use_cache=True,
@@ -275,7 +280,6 @@ class Model:
 
         self.amp = amp
         self.writer = None
-        torch.backends.cudnn.benchmark = cudnn
         torch.set_float32_matmul_precision("high")
 
     def tensorboard_setting(self):
