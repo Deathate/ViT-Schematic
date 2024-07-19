@@ -4,7 +4,7 @@ from scipy.spatial.distance import cdist
 import config
 from Model import *
 from vit import Transformer
-set_seed(0)
+# set_seed(0)
 
 class FormalDatasetWindowed(Datasetbehaviour):
     def __init__(self, size=None):
@@ -283,7 +283,7 @@ def criterion(y_hat, y, meta):
     gtruth_label = gtruth_label.to(torch.float32)
     predicted_box[predicted_label] = y[predicted_label].to(predicted_box.dtype)
 
-    empty_weight = 0.1
+    empty_weight = 1
     loss_box = 0
     for i in range(len(y)):
         value = F.smooth_l1_loss(predicted_box[i], y[i])

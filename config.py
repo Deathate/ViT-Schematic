@@ -1,7 +1,7 @@
 # PRETRAINED_PATH = "complete/complex_detr/best.pth"
 # PRETRAINED_PATH = "runs/FindPoints/0603_10-35-06__decoder/best.pth"
 # PRETRAINED_PATH=""
-PRETRAINED_PATH = "latest"
+PRETRAINED_PATH = ""
 KEEP_EPOCH = True
 EVAL = False
 TEST = False
@@ -15,4 +15,4 @@ DATASET_SIZE = None
 BATCH_SIZE = 32
 BATCH_STEP = 128 / BATCH_SIZE
 DEVICE_IDS = [0]
-DROPOUT = 0.1
+DROPOUT = 0
