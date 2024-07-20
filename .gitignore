@@ -82,6 +82,8 @@ runs/FormalDatasetWindowed/0719_20-26-28__decoder/best.pth
 runs/FormalDatasetWindowed/0719_20-26-28__decoder/latest.pth
 runs/FormalDatasetWindowed/0719_20-02-32__decoder/best.pth
 runs/FormalDatasetWindowed/0719_20-02-32__decoder/latest.pth
+custom_datasets/FormalDatasetWindowed/FormalDatasetWindowed_c12c047a874c2080f09c74923ac9576349341c46ac2c6316920cbbee0276a7f1.pkl
+custom_datasets/FormalDatasetWindowed/cache/2514fd78896403967e37d2913021fa70708ff919abd786175bd889fb1d38adf6
 custom_datasets/FormalDatasetWindowed/cache/f422f1258ee006dd5b4ccd26ff2a2b395fee8e90638319d7028d17b551c91a9b
 custom_datasets/FormalDatasetWindowed/FormalDatasetWindowed_20b7f1dd57a381e8bf2aec7c388c8ea5058f2cdaa8cc827811d0be7ec41d2c05.pkl
 custom_datasets/FormalDataset/FormalDataset_7650b6fb201f15f8a10cdcddf6e234b8cc060e2e12d91c8da17a700872aff450.pkl
@@ -95,13 +97,7 @@ custom_datasets/FormalDataset/cache/fee45676ab64ff201acb94e88abb466815dcd20aa9d9
 custom_datasets/FormalDataset/cache/cdc543aa277fcd2c748cc24fbe93ec596a8e3f081c6c4c682e5c9fa4f08fc9ba
 data_source/dataset_cell.zip
 data_source/data.zip
-runs/FormalDatasetWindowed/0720_00-13-48__decoder/best.pth
-runs/FormalDatasetWindowed/0720_00-13-48__decoder/latest.pth
-runs/FormalDatasetWindowed/0719_17-50-43__decoder/best.pth
-runs/FormalDatasetWindowed/0719_17-50-43__decoder/latest.pth
-runs/FormalDatasetWindowed/0719_21-53-21__decoder/best.pth
-runs/FormalDatasetWindowed/0719_21-53-21__decoder/latest.pth
-runs/FormalDatasetWindowed/0719_20-37-42__decoder/best.pth
-runs/FormalDatasetWindowed/0719_20-37-42__decoder/latest.pth
-runs/FormalDataset/0719_17-41-55__decoder/best.pth
-runs/FormalDataset/0719_17-41-55__decoder/latest.pth
+runs/FormalDatasetWindowed/0720_10-04-11__decoder/best.pth
+runs/FormalDatasetWindowed/0720_10-04-11__decoder/latest.pth
+runs/FormalDatasetWindowed/0720_09-55-17__decoder/best.pth
+runs/FormalDatasetWindowed/0720_09-55-17__decoder/latest.pth

@@ -969,7 +969,7 @@ def draw_bounding_boxes(img, box, width=2):
     box[:, [1, 3]] = box[:, [3, 1]]
     box = torch.tensor(box)
     transform = transforms.Compose([transforms.ToImage(), transforms.ToDtype(torch.uint8)])
-    return draw_bounding_boxes(transform(img), boxes=box * img_width, colors="red", width=width)
+    return draw_bounding_boxes(transform(img), boxes=box * img_width, colors="red", width=  width)
 
 
 def draw_point(img, box, width=4):
