@@ -1,6 +1,5 @@
 import collections.abc as abc
 import copy
-import os
 import datetime
 import gc
 import glob
@@ -95,16 +94,20 @@ def select_gpu_with_most_free_memory():
 
 
 rng = np.random.default_rng()
-def set_seed(seed):
-    # os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
-    # os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"
-    # torch.use_deterministic_algorithms(True)
+
+
+def set_seed(seed, deterministic):
+    if deterministic:
+        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":4096:8"
+        # os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":16:8"
+        torch.use_deterministic_algorithms(True)
     torch.manual_seed(seed)
     np.random.seed(seed)
     random.seed(seed)
+    torch.backends.cudnn.enabled = False
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
-    torch.backends.cudnn.enabled = False
+
 
 class DataCell(typing.NamedTuple):
     input: object
@@ -152,7 +155,7 @@ class Datasetbehaviour:
                     range(self.size),
                     num_cpus=os.cpu_count() - 4,
                 )
-            self.__dataset = np.array(dataset, dtype=object)
+            self.__dataset = np.array([x for x in dataset if x is not None], dtype=object)
             pickle.dump(self.__dataset, open(self.filepath, "wb"))
         print("--- [Loading done] ---\n")
         Datasetbehaviour.reset()
@@ -231,7 +234,7 @@ class Model:
         xtransform=None,
         ytransform=None,
         validation_split=0.1,
-        shuffle=True,
+        shuffle=False,
         amp=True,
         suffix="",
         cudalize=True,
@@ -288,9 +291,11 @@ class Model:
         self.writer = SummaryWriter(comment="", log_dir=self.log_dir)
         layout = {
             "metrics": {
-                "loss": ["Multiline", ["Loss/train"]],
-                "accuracy": ["Multiline", ["Loss/validation"]],
-                "learning rate": ["Multiline", ["lr"]],
+                "Loss": ["Multiline", ["Loss/train"]],
+                "Loss": ["Multiline", ["Loss/validation"]],
+                "Acc": ["Multiline", ["Acc/train"]],
+                "Acc": ["Multiline", ["Acc/validation"]],
+                "Learning Rate": ["Multiline", ["lr"]],
             },
         }
         self.writer.add_custom_scalars(layout)
@@ -456,14 +461,17 @@ class Model:
                 with tqdm(
                     total=len(self.train_loader) // backprop_freq,
                     bar_format="{desc}{n_fmt}/{total_fmt}|{bar}| - {elapsed}s{postfix}",
+                    dynamic_ncols=True,
                 ) as pbar:
                     pbar.set_description(f"Epoch {ep+1}/{end} ({max_epochs})")
                     train_loss = []
-                    pbar.set_postfix({"loss": "---", "acc": "---"})
+                    train_acc = []
+                    pbar.set_postfix({"TLoss": "---", "VLoss": "---"})
 
                     try:
                         self.model.train()
                         accum_loss = 0
+                        accum_acc = 0
                         for batch_num, (seq, data, target) in enumerate(self.train_loader):
                             if not self.cudalize:
                                 data = cudalization(data)
@@ -472,37 +480,37 @@ class Model:
                             if self.amp:
                                 with torch.cuda.amp.autocast():
                                     y_hat = self.model(data, target)
-                                    loss = (
-                                        self.loss(
-                                            y_hat,
-                                            target,
-                                            criterion,
-                                            eval=False,
-                                            target_transform=target_transform,
-                                            eval_metrics=eval_metrics,
-                                            meta=create_meta(seq),
-                                        )
-                                        / backprop_freq
-                                    )
-                                    scaler.scale(loss).backward()
-                                    accum_loss += loss.item()
-                                    # pbar.write(f"loss: {loss.item()}")
-                            else:
-                                y_hat = self.model(data, target)
-                                loss = (
-                                    self.loss(
+                                    loss, acc = self.loss(
                                         y_hat,
                                         target,
                                         criterion,
-                                        eval=False,
+                                        eval=True,
                                         target_transform=target_transform,
                                         eval_metrics=eval_metrics,
                                         meta=create_meta(seq),
                                     )
-                                    / backprop_freq
+                                    loss = loss / backprop_freq
+                                    acc = acc / backprop_freq
+                                    scaler.scale(loss).backward()
+                                    accum_loss += loss.item()
+                                    accum_acc += acc.item()
+                                    # pbar.write(f"loss: {loss.item()}")
+                            else:
+                                y_hat = self.model(data, target)
+                                loss, acc = self.loss(
+                                    y_hat,
+                                    target,
+                                    criterion,
+                                    eval=True,
+                                    target_transform=target_transform,
+                                    eval_metrics=eval_metrics,
+                                    meta=create_meta(seq),
                                 )
+                                loss = loss / backprop_freq
+                                acc = acc / backprop_freq
                                 loss.backward()
                                 accum_loss += loss.item()
+                                accum_acc += acc.item()
                             if (batch_num + 1) % backprop_freq == 0:
                                 if self.amp:
                                     scaler.step(optimizer)
@@ -518,15 +526,23 @@ class Model:
                                 #                  "model_graph", format="png")
 
                                 # torch.nn.utils.clip_grad_norm_(self.model.parameters(), 1)
-                                pbar.set_postfix({"loss": f"{accum_loss:.3E}", "acc": "---"})
+                                pbar.set_postfix(
+                                    {
+                                        "TLoss": f"{accum_loss:.3E}",
+                                        "TAcc": f"{accum_acc:.2}" if accum_acc >= 0 else "---",
+                                        "VLoss": "---",
+                                        "VAcc": "---",
+                                    }
+                                )
                                 pbar.update(1)
                                 train_loss.append(accum_loss)
+                                train_acc.append(accum_acc)
                                 accum_loss = 0
+                                accum_acc = 0
                         self.model.eval()
                         if training_epoch_end:
                             training_epoch_end()
                     except Exception as e:
-                        # print("Error in loss calculation", e)
                         print("!!!-------- Error captured --------!!!")
                         try:
                             error = tabulate(
@@ -545,32 +561,44 @@ class Model:
                         raise e
 
                     train_loss = np.mean(train_loss)
+                    train_acc = np.mean(train_acc)
                     self.writer.add_scalar("Loss/train", train_loss, ep + 1)
+                    self.writer.add_scalar("Acc/train", train_acc, ep + 1)
                     # calculate validation loss
                     val_loss = []
+                    accs = []
                     for seq, data, target in self.test_loader:
                         if not self.cudalize:
                             data = cudalization(data)
                             target = cudalization(target)
                         y_hat = self.predict(data, target)
-                        val_loss.append(
-                            self.loss(
-                                y_hat,
-                                target,
-                                criterion,
-                                eval=True,
-                                target_transform=target_transform,
-                                eval_metrics=eval_metrics,
-                                meta=create_meta(seq),
-                            )
+                        loss, acc = self.loss(
+                            y_hat,
+                            target,
+                            criterion,
+                            eval=True,
+                            target_transform=target_transform,
+                            eval_metrics=eval_metrics,
+                            meta=create_meta(seq),
                         )
+                        val_loss.append(loss)
+                        accs.append(acc)
                     val_loss = torch.stack(val_loss).mean()
+                    acc = torch.stack(accs).mean()
                     self.writer.add_scalar("Loss/validation", val_loss, ep + 1)
+                    self.writer.add_scalar("Acc/validation", acc, ep + 1)
                     latest_path = Path(self.log_dir) / "latest.pth"
                     save_model(latest_path)
                     # self.writer.add_scalars('Loss', {'validation': val_loss,
                     #                                  'train': train_loss}, ep + 1)
-                    pbar.set_postfix({"loss": f"{train_loss:.3E}", "acc": f"{val_loss:.3E}"})
+                    pbar.set_postfix(
+                        {
+                            "TLoss": f"{train_loss:.3E}",
+                            "TAcc": f"{train_acc:.2}" if train_acc >= 0 else "---",
+                            "VLoss": f"{val_loss:.3E}",
+                            "VAcc": f"{acc:.2}" if acc >= 0 else "---",
+                        }
+                    )
                     if val_loss <= best_quantity:
                         best_quantity = val_loss
                         saved_path = Path(self.log_dir) / "best.pth"
@@ -645,7 +673,11 @@ class Model:
         if eval and eval_metrics:
             return eval_metrics(criterion, y_hat, y, meta)
         else:
-            return criterion(y_hat, y, meta)
+            result = criterion(y_hat, y, meta)
+            if isinstance(result, tuple):
+                return result[0], -1
+            else:
+                return result, -1
 
     @property
     def weight(self):
@@ -969,10 +1001,10 @@ def draw_bounding_boxes(img, box, width=2):
     box[:, [1, 3]] = box[:, [3, 1]]
     box = torch.tensor(box)
     transform = transforms.Compose([transforms.ToImage(), transforms.ToDtype(torch.uint8)])
-    return draw_bounding_boxes(transform(img), boxes=box * img_width, colors="red", width=  width)
+    return draw_bounding_boxes(transform(img), boxes=box * img_width, colors="red", width=width)
 
 
-def draw_point(img, box, width=4):
+def draw_point(img, box, width=4, color=(0, 255, 0)):
     if isinstance(img, np.ndarray):
         img = img.copy()
     elif isinstance(img, torch.Tensor):
@@ -990,7 +1022,7 @@ def draw_point(img, box, width=4):
     box[..., 1] *= img_height
     box = box.astype(np.int32)
     for b in box:
-        cv2.circle(img, (b[0], b[1]), width, (0, 255, 0), -1)
+        cv2.circle(img, (b[0], b[1]), width, color, -1)
     return img
 
 

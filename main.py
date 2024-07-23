@@ -5,7 +5,6 @@ import config
 from Model import *
 from vit import Transformer
 
-set_seed(0)
 class DoubleLineFormalDataset(Datasetbehaviour):
     def __init__(self, size, total_output, line_num):
         super().__init__(size, self.__create, total_output, line_num)
