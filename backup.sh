@@ -4,9 +4,9 @@
 #     git lfs track "$file"
 # done
 cp .gitignore .gitignore.bak
-find * -size +99M | cat >> .gitignore
+find * -size +49M | cat >> .gitignore
 git add -A
 git commit -m "Auto commit $(date +%H/%M/%m/%d/%Y)"
-git push -f
-mv .gitignore .gitignore_full
+rm .gitignore
 mv .gitignore.bak .gitignore
+git push -f
