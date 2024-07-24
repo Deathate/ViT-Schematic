@@ -3,15 +3,15 @@ import platform
 machine_name = platform.node()
 # for aieda lab machine
 if machine_name == "DESKTOP-S347DEH":
-    DEPTH = 6
+    DEPTH = 3
     NUM_HEADS = 8
     EMBED_DIM = 50
     # PRETRAINED_PATH = "complete/complex_detr/best.pth"
     # PRETRAINED_PATH = "runs/FindPoints/0603_10-35-06__decoder/best.pth"
-    PRETRAINED_PATH = "latest"
     PRETRAINED_PATH = ""
+    PRETRAINED_PATH = "latest"
     KEEP_EPOCH = True
-    EVAL = True
+    EVAL = False
     TEST = False
     if EVAL:
         TEST = True
@@ -24,7 +24,7 @@ if machine_name == "DESKTOP-S347DEH":
     DEVICE_IDS = [0]
     DROPOUT = 0
     DATASET_PATH = "dataset_windowed_200000"
-    PATCH_SIZE = 20
+    PATCH_SIZE = 10
     DETERMINISTIC = False
 elif machine_name == "nycu-ai-eda-5":
     DEPTH = 6

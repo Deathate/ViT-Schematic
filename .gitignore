@@ -72,3 +72,11 @@ runs/FormalDatasetWindowed/0723_17-49-34__decoder/best.pth
 runs/FormalDatasetWindowed/0723_17-49-34__decoder/latest.pth
 runs/FormalDatasetWindowed/0722_21-36-54__decoder/best.pth
 runs/FormalDatasetWindowed/0722_21-36-54__decoder/latest.pth
+complete/complex_detr_2/best.pth
+complete/complex_detr/best.pth
+custom_datasets/FormalDatasetWindowed/FormalDatasetWindowed_6ad9f01557162082ac3d4e9ac70dca0ce2454299b4b4ea0e4a9887d34231098e.pkl
+custom_datasets/FormalDatasetWindowed/cache/234d6cad1a933036cb4bf5e197fdcd3d2c6a3bd069c7a84357128ce24961531d
+runs/FormalDatasetWindowed/0724_13-45-16__decoder/best.pth
+runs/FormalDatasetWindowed/0724_13-45-16__decoder/latest.pth
+runs/FormalDatasetWindowed/0724_11-21-40__decoder/best.pth
+runs/FormalDatasetWindowed/0724_11-21-40__decoder/latest.pth

@@ -124,7 +124,7 @@ class Datasetbehaviour:
         filepath = self.__get_filepath(key)
         print("** [Create dataset]")
         print("[Identify file path]")
-        print(textwrap.fill(str(filepath), 70, initial_indent=" " * 4))
+        print(textwrap.fill(str(filepath), 70, initial_indent=" " * 2))
         self.filepath = str(filepath)
         self.__dataset = None
 
