@@ -6,10 +6,8 @@ if machine_name == "DESKTOP-S347DEH":
     DEPTH = 3
     NUM_HEADS = 8
     EMBED_DIM = 50
-    # PRETRAINED_PATH = "complete/complex_detr/best.pth"
-    # PRETRAINED_PATH = "runs/FindPoints/0603_10-35-06__decoder/best.pth"
+    # PRETRAINED_PATH = "latest"
     PRETRAINED_PATH = ""
-    PRETRAINED_PATH = "latest"
     KEEP_EPOCH = True
     EVAL = False
     TEST = False
@@ -18,7 +16,7 @@ if machine_name == "DESKTOP-S347DEH":
     LEARNING_RATE = 1e-4
     MAX_EPOCHS = 5000
     EPOCHS = 5000
-    DATASET_SIZE = 150000
+    DATASET_SIZE = 130000
     BATCH_SIZE = 32
     BATCH_STEP = 128 / BATCH_SIZE
     DEVICE_IDS = [0]
@@ -30,8 +28,6 @@ elif machine_name == "nycu-ai-eda-5":
     DEPTH = 6
     NUM_HEADS = 8
     EMBED_DIM = 50
-    # PRETRAINED_PATH = "complete/complex_detr/best.pth"
-    # PRETRAINED_PATH = "runs/FindPoints/0603_10-35-06__decoder/best.pth"
     PRETRAINED_PATH = "latest"
     PRETRAINED_PATH = ""
     KEEP_EPOCH = True
@@ -42,7 +38,7 @@ elif machine_name == "nycu-ai-eda-5":
     LEARNING_RATE = 1e-4
     MAX_EPOCHS = 5000
     EPOCHS = 5000
-    DATASET_SIZE = 150000
+    DATASET_SIZE = 130000
     BATCH_SIZE = 32
     BATCH_STEP = 128 / BATCH_SIZE
     DEVICE_IDS = [0]
