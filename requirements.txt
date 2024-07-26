@@ -2,7 +2,7 @@ bokeh==3.4.0
 brotli==1.1.0
 bytecode==0.15.1
 cached-property==1.5.2
-diffusers==0.29.0.dev0
+diffusers
 einops==0.8.0
 ftfy==6.2.0
 graphviz==0.20.3

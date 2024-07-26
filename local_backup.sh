@@ -1,0 +1,1 @@
+rsync -vzhr --delete --progress --bwlimit=10M ../ViT-Schematic server5:/home/112/deathate/
