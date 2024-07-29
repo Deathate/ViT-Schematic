@@ -80,7 +80,13 @@ runs/FormalDatasetWindowed/0724_14-40-41__decoder/best.pth
 runs/FormalDatasetWindowed/0724_14-40-41__decoder/latest.pth
 complete/complex_detr_2/best.pth
 complete/complex_detr/best.pth
+complete/0725_11-57-10__decoder/latest.pth
+complete/0725_11-57-10__decoder/best.pth
+custom_datasets/FormalDatasetWindowed/FormalDatasetWindowed_8f36a53b98cf4ded1a1ad79f98f037456c23d0ebfda0e8b1bd27571af7386568.pkl
+custom_datasets/FormalDatasetWindowed/cache/88f2ac4a0dd804d0763025aa35c4814fb271bf2d250425d902b3d30c8fc76a16
 custom_datasets/FormalDatasetWindowed/cache/6c5af2f80fe8c4c99a5f0e1589169eab929a4d9a3a2b43c3389bf39d703c2cac
 custom_datasets/FormalDatasetWindowed/FormalDatasetWindowed_500f254d79deb7d208c7cfa845abebbd23b2f3de60a5b7274ed886e33b5fd01d.pkl
-runs/FormalDatasetWindowed/0725_11-57-10__decoder/latest.pth
-runs/FormalDatasetWindowed/0725_11-57-10__decoder/best.pth
+runs/FormalDatasetWindowed/0729_13-52-56__decoder/latest.pth
+runs/FormalDatasetWindowed/0729_13-52-56__decoder/best.pth
+runs/FormalDatasetWindowed/0729_13-56-42__decoder/latest.pth
+runs/FormalDatasetWindowed/0729_13-56-42__decoder/best.pth

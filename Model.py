@@ -362,6 +362,7 @@ class Model:
         backprop_freq=1,
         device_ids=[0],
         keep_epoch=True,
+        keep_optimizer=True,
     ):
         now = datetime.datetime.now()
         self.log_dir = Path(
@@ -390,11 +391,12 @@ class Model:
                 # it is recommended to move a model to GPU before constructing an optimizer
                 model.load_state_dict(checkpoint["model"], strict=False)
                 model = self.parallel(model, device_ids)
-                print("** [Pretrained optimizer loaded]")
-                optimizer.load_state_dict(checkpoint["optimizer"])
-                if optimizer.param_groups[0]["lr"] != lr:
-                    print(f"** [Optimizer learning rate changed to {lr}]")
-                    optimizer.param_groups[0]["lr"] = lr
+                if keep_optimizer:
+                    print("** [Pretrained optimizer loaded]")
+                    optimizer.load_state_dict(checkpoint["optimizer"])
+                    if optimizer.param_groups[0]["lr"] != lr:
+                        print(f"** [Optimizer learning rate changed to {lr}]")
+                        optimizer.param_groups[0]["lr"] = lr
                 if checkpoint.get("epoch", False) and keep_epoch:
                     previous_epoch = checkpoint["epoch"] + 1
 

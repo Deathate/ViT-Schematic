@@ -1,0 +1,200 @@
+{
+    "os": "Linux-5.15.153.1-microsoft-standard-WSL2-x86_64-with-glibc2.39",
+    "python": "3.11.9",
+    "heartbeatAt": "2024-07-29T12:49:10.136642",
+    "startedAt": "2024-07-29T12:49:09.433815",
+    "docker": null,
+    "cuda": null,
+    "args": [],
+    "state": "running",
+    "program": "/home/deathate/Projects/ViT-Schematic/tmp.py",
+    "codePathLocal": "tmp.py",
+    "codePath": "tmp.py",
+    "git": {
+        "remote": "https://github.com/Deathate/ViT-Schematic.git",
+        "commit": "bb74ca3aae1f75c890b895cb8d1f0e18f8c81bb6"
+    },
+    "email": "ho.aron0105@gmail.com",
+    "root": "/home/deathate/Projects/ViT-Schematic",
+    "host": "DESKTOP-S347DEH",
+    "username": "deathate",
+    "executable": "/home/deathate/miniconda3/envs/torchenv/bin/python",
+    "cpu_count": 16,
+    "cpu_count_logical": 32,
+    "cpu_freq": {
+        "current": 2995.202000000001,
+        "min": 0.0,
+        "max": 0.0
+    },
+    "cpu_freq_per_core": [
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        },
+        {
+            "current": 2995.202,
+            "min": 0.0,
+            "max": 0.0
+        }
+    ],
+    "disk": {
+        "/": {
+            "total": 1006.853931427002,
+            "used": 74.89260864257812
+        }
+    },
+    "memory": {
+        "total": 98.23220825195312
+    }
+}
