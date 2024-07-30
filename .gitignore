@@ -88,5 +88,9 @@ custom_datasets/FormalDatasetWindowed/cache/6c5af2f80fe8c4c99a5f0e1589169eab929a
 custom_datasets/FormalDatasetWindowed/FormalDatasetWindowed_500f254d79deb7d208c7cfa845abebbd23b2f3de60a5b7274ed886e33b5fd01d.pkl
 runs/FormalDatasetWindowed/0729_13-52-56__decoder/latest.pth
 runs/FormalDatasetWindowed/0729_13-52-56__decoder/best.pth
+runs/FormalDatasetWindowed/0730_00-10-50__decoder/latest.pth
+runs/FormalDatasetWindowed/0730_00-10-50__decoder/best.pth
 runs/FormalDatasetWindowed/0729_13-56-42__decoder/latest.pth
 runs/FormalDatasetWindowed/0729_13-56-42__decoder/best.pth
+runs/FormalDatasetWindowed/0730_00-11-09__decoder/latest.pth
+runs/FormalDatasetWindowed/0730_00-11-09__decoder/best.pth

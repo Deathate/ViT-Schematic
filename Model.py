@@ -58,6 +58,7 @@ from sklearn.metrics import accuracy_score, classification_report
 from tabulate import tabulate
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
 from torch.utils.tensorboard import SummaryWriter
+from torchinfo import summary
 from torchmetrics import Accuracy
 from torchmetrics.classification import MulticlassAccuracy
 from torchvision import models
@@ -225,6 +226,14 @@ def cudalization(x):
         return [cudalization(y) for y in x]
 
 
+@dataclass
+class MetaData:
+    data: list[DataCell]
+    model: nn.Module
+    epoch: int
+    mode: str
+
+
 class Model:
     def __init__(
         self,
@@ -284,6 +293,7 @@ class Model:
         self.amp = amp
         self.writer = None
         torch.set_float32_matmul_precision("high")
+        self.meta: MetaData = None
 
     def tensorboard_setting(self):
         if self.writer:
@@ -434,12 +444,13 @@ class Model:
             # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, min_lr=1e-6)
 
             self.model.train()
-            Meta_data = namedtuple("Meta_data", ["data", "model"])
 
-            def create_meta(seq):
-                return Meta_data(
-                    [DataCell(*self.data[s]) for s in seq],
-                    self.model if len(device_ids) == 1 else self.model.module,
+            def create_meta(seq, ep, mode) -> MetaData:
+                return MetaData(
+                    data=[DataCell(*self.data[s]) for s in seq],
+                    model=self.model if len(device_ids) == 1 else self.model.module,
+                    epoch=ep,
+                    mode=mode,
                 )
 
             for ep in range(start + previous_epoch, min(end, start + previous_epoch + epochs)):
@@ -478,10 +489,10 @@ class Model:
                             if not self.cudalize:
                                 data = cudalization(data)
                                 target = cudalization(target)
-
                             if self.amp:
                                 with torch.cuda.amp.autocast():
                                     y_hat = self.model(data, target)
+                                    self.meta = create_meta(seq, ep, "train")
                                     loss, acc = self.loss(
                                         y_hat,
                                         target,
@@ -489,7 +500,6 @@ class Model:
                                         eval=True,
                                         target_transform=target_transform,
                                         eval_metrics=eval_metrics,
-                                        meta=create_meta(seq),
                                     )
                                     loss = loss / backprop_freq
                                     acc = acc / backprop_freq
@@ -499,6 +509,7 @@ class Model:
                                     # pbar.write(f"loss: {loss.item()}")
                             else:
                                 y_hat = self.model(data, target)
+                                self.meta = create_meta(seq, ep)
                                 loss, acc = self.loss(
                                     y_hat,
                                     target,
@@ -506,7 +517,6 @@ class Model:
                                     eval=True,
                                     target_transform=target_transform,
                                     eval_metrics=eval_metrics,
-                                    meta=create_meta(seq),
                                 )
                                 loss = loss / backprop_freq
                                 acc = acc / backprop_freq
@@ -574,6 +584,7 @@ class Model:
                             data = cudalization(data)
                             target = cudalization(target)
                         y_hat = self.predict(data, target)
+                        self.meta = create_meta(seq, ep, mode="val")
                         loss, acc = self.loss(
                             y_hat,
                             target,
@@ -581,7 +592,6 @@ class Model:
                             eval=True,
                             target_transform=target_transform,
                             eval_metrics=eval_metrics,
-                            meta=create_meta(seq),
                         )
                         val_loss.append(loss)
                         accs.append(acc)
@@ -663,7 +673,7 @@ class Model:
     #     y = self.ytransform(y)
     #     return self.model(x, y)
 
-    def loss(self, y_hat, y, criterion, eval, target_transform, eval_metrics, meta):
+    def loss(self, y_hat, y, criterion, eval, target_transform, eval_metrics):
         try:
             y = target_transform(y_hat, y)
         except Exception as e:
@@ -673,9 +683,9 @@ class Model:
                 raise (e)
             # pass
         if eval and eval_metrics:
-            return eval_metrics(criterion, y_hat, y, meta)
+            return eval_metrics(criterion, y_hat, y)
         else:
-            result = criterion(y_hat, y, meta)
+            result = criterion(y_hat, y)
             if isinstance(result, tuple):
                 return result[0], -1
             else:
@@ -686,27 +696,26 @@ class Model:
         return "\n".join(map(lambda x: str(x), self.model.named_parameters()))
 
     def model_overview(self, model):
-        from torchinfo import summary
-
-        s = summary(model, row_settings=("var_names",))
-        c = count()
-        table = []
-        params_num = 0
-        for x in s.summary_list:
-            if x.depth == 1:
-                table.append([next(c), x.var_name, type(x.module).__name__, x.num_params])
-                params_num += x.num_params
-        if s.trainable_params - params_num > 0:
-            table.append([next(c), "other", "---", s.trainable_params - params_num])
-        table.append(["Total", "", "", s.total_params])
-        param_size = 0
-        for param in model.parameters():
-            param_size += param.nelement() * param.element_size()
-        buffer_size = 0
-        for buffer in model.buffers():
-            buffer_size += buffer.nelement() * buffer.element_size()
-        size_all_mb = (param_size + buffer_size) / 1024**2
-        table.append(["Size (MB)", "", "", f"{size_all_mb:.3f}"])
+        with HiddenPrints():
+            s = summary(model, row_settings=("var_names",))
+            c = count()
+            table = []
+            params_num = 0
+            for x in s.summary_list:
+                if x.depth == 1:
+                    table.append([next(c), x.var_name, type(x.module).__name__, x.num_params])
+                    params_num += x.num_params
+            if s.trainable_params - params_num > 0:
+                table.append([next(c), "other", "---", s.trainable_params - params_num])
+            table.append(["Total", "", "", s.total_params])
+            param_size = 0
+            for param in model.parameters():
+                param_size += param.nelement() * param.element_size()
+            buffer_size = 0
+            for buffer in model.buffers():
+                buffer_size += buffer.nelement() * buffer.element_size()
+            size_all_mb = (param_size + buffer_size) / 1024**2
+            table.append(["Size (MB)", "", "", f"{size_all_mb:.3f}"])
         print(
             tabulate(
                 table,

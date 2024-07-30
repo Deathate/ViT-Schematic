@@ -30,8 +30,8 @@ class FormalDatasetWindowed(Datasetbehaviour):
         img = cv2.imread(
             self.dataset_source + "/images/" + Path(path).stem + ".png", cv2.IMREAD_UNCHANGED
         )
-        if img.sum() / 255 / 10000 / 4 > 0.99:
-            return None
+        # if img.sum() / 255 / 10000 / 4 > 0.99:
+        #     return None
         img_height, img_width = img.shape[:2]
         for net, prop in data.items():
             prop = [x for x in prop if len(x) == 2 or (len(prop) == 1 and len(x) == 1)]
@@ -299,11 +299,13 @@ def Hungarian_Order(g1b, g2b):
     return indices
 
 
-stage = 0
+stage = config.STAGE
+
+temp = {"0": [], "1": []}
 
 
-def criterion(y_hat, y, meta):
-    box_head_result = meta.model.box_head(y_hat[:, :result_num])
+def criterion(y_hat, y):
+    box_head_result = model.meta.model.box_head(y_hat[:, :result_num])
     predicted_box, predicted_label_logit = box_head_result[:, :, :2], box_head_result[:, :, 2]
     predicted_label = torch.sigmoid(predicted_label_logit) < 0.5
     Hungarian_Order(predicted_box, y)
@@ -340,7 +342,7 @@ def criterion(y_hat, y, meta):
                 c2n = c2[1].tobytes()
                 box_pair = [c1[0], c2[0]]
                 if c1[1][0] >= 0 and c2[1][0] >= 0:
-                    if meta.data[i].meta.has_edge(c1n, c2n):
+                    if model.meta.data[i].meta.has_edge(c1n, c2n):
                         valid_relation.append(box_pair)
                     else:
                         non_valid_relation.append(box_pair)
@@ -361,9 +363,10 @@ def criterion(y_hat, y, meta):
                     label_list.append(label)
                     label_list.append(label)
         loss_relation = F.binary_cross_entropy_with_logits(
-            meta.model.relation_heads_simple(torch.stack(joint_token_list)),
+            model.meta.model.relation_heads_simple(torch.stack(joint_token_list)),
             torch.stack(label_list).cuda(),
         )
+        return loss_box + loss_relation, predicted_box
     elif stage == 2:
         valid_relation_num = 1
         non_valid_relation_num = 2
@@ -378,11 +381,11 @@ def criterion(y_hat, y, meta):
                 c1n = c1[1].tobytes()
                 c2n = c2[1].tobytes()
                 box_pair = [c1[0], c2[0]]
-                if c1[1][0] >= 0 and c2[1][0] >= 0:
-                    if meta.data[i].meta.has_edge(c1n, c2n):
-                        valid_relation.append(box_pair)
-                    else:
-                        non_valid_relation.append(box_pair)
+                # if c1[1][0] >= 0 and c2[1][0] >= 0:
+                if model.meta.data[i].meta.has_edge(c1n, c2n):
+                    valid_relation.append(box_pair)
+                else:
+                    non_valid_relation.append(box_pair)
             for times, relation, label in [
                 (min(valid_relation_num, len(valid_relation)), valid_relation, 1),
                 (min(non_valid_relation_num, len(non_valid_relation)), non_valid_relation, 0),
@@ -401,10 +404,53 @@ def criterion(y_hat, y, meta):
                     label_list.append(label)
                     label_list.append(label)
         loss_relation = F.binary_cross_entropy_with_logits(
-            meta.model.relation_heads(torch.stack(joint_token_list)),
+            model.meta.model.relation_heads(torch.stack(joint_token_list)),
             torch.stack(label_list).cuda(),
         )
-    return loss_box + loss_relation, predicted_box
+        return loss_box + loss_relation, predicted_box
+    elif stage == 3:
+        global temp
+        joint_token_list = []
+        label_list = []
+        for i, element in enumerate(y.cpu().detach().numpy()):
+            valid_relation = []
+            non_valid_relation = []
+            element_with_order = list(enumerate(element))
+            np.random.shuffle(element_with_order)
+            for c1, c2 in itertools.combinations(element_with_order, 2):
+                c1n = c1[1].tobytes()
+                c2n = c2[1].tobytes()
+                box_pair = [c1[0], c2[0]]
+                if c1[1][0] >= 0 and c2[1][0] >= 0:
+                    if model.meta.data[i].meta.has_edge(c1n, c2n):
+                        valid_relation.append(box_pair)
+                    else:
+                        non_valid_relation.append(box_pair)
+            for times, relation, label in [
+                (len(valid_relation), valid_relation, 1),
+                (len(non_valid_relation), non_valid_relation, 0),
+            ]:
+                label = torch.tensor([label], dtype=torch.float32)
+                for time in range(times):
+                    relation_from = relation[time][0]
+                    relation_to = relation[time][1]
+                    obj_token_1 = y_hat[i][relation_from].detach()
+                    obj_token_2 = y_hat[i][relation_to].detach()
+                    joint_token = torch.cat((obj_token_1, obj_token_2))
+                    joint_token_inv = torch.cat((obj_token_2, obj_token_1))
+                    joint_token_list.append(joint_token)
+                    joint_token_list.append(joint_token_inv)
+                    label_list.append(label)
+                    label_list.append(label)
+                    temp["1" if label == 1 else "0"].append((joint_token, label))
+                    temp["1" if label == 1 else "0"].append((joint_token_inv, label))
+        if model.meta.epoch == 1:
+            print(temp["1"])
+            exit()
+        loss_relation = F.binary_cross_entropy_with_logits(
+            model.meta.model.relation_heads_simple(torch.stack(joint_token_list)),
+            torch.stack(label_list).cuda(),
+        )
     return loss_relation, predicted_box
 
     for y1, y2 in zip(y_hat, y):
@@ -427,8 +473,8 @@ def criterion(y_hat, y, meta):
     return total_loss
 
 
-def eval_metrics(criterion, y_hat, y, meta):
-    loss, pbox = criterion(y_hat, y, meta)
+def eval_metrics(criterion, y_hat, y):
+    loss, pbox = criterion(y_hat, y)
     length = pbox.shape[0]
     accs = 0
     for i in range(length):
@@ -462,9 +508,7 @@ model.suffix = "_" + style
 model.fit(
     m,
     criterion,
-    optim.AdamW(
-        m.parameters(), lr=config.LEARNING_RATE if stage == 0 else config.RELATION_LEARNING_RATE
-    ),
+    optim.AdamW(m.parameters(), lr=config.LEARNING_RATE if stage == 0 else config.LEARNING_RATE),
     config.EPOCHS,
     max_epochs=config.MAX_EPOCHS if hasattr(config, "MAX_EPOCHS") else float("inf"),
     pretrained_path=config.PRETRAINED_PATH,
@@ -487,30 +531,31 @@ if config.EVAL:
     for i in range(k, k + 10):
         image = dataset_test[i][0][:, :, :3]
         # image_bk = image.copy()
-        # image_line = image.copy()
         latent = result[i][1]
         box_latent = model.model.box_head(latent[:result_num])
         box = box_latent[:, :2].cpu()
         # classes = F.sigmoid(box_latent[:, 2]) > 0.5
         # box[~classes] = 0
-        image_point = draw_point(image, box, width=2, color=(255, 0, 0))
-        print(box[np.where(box[:, 0] > 0)])
-        # for a, b in itertools.combinations(latent[:result_num], 2):
-        #     relations = model.model.relation_heads(torch.cat((a, b, latent[-1])))
-        #     if F.sigmoid(relations) > 0.5:
-        #         p1 = model.model.box_head(a).detach().cpu()
-        #         p2 = model.model.box_head(b).detach().cpu()
-        #         if F.sigmoid(p1[2]) > 0.5 and F.sigmoid(p2[2]) > 0.5:
-        #             p1_pos, p2_pos = p1[:2].numpy(), p2[:2].numpy()
-        #             p1_pos[1] = 1 - p1_pos[1]
-        #             p2_pos[1] = 1 - p2_pos[1]
-        #             p1_pos *= 200
-        #             p2_pos *= 200
-        #             p1_pos = p1_pos.astype(int)
-        #             p2_pos = p2_pos.astype(int)
-        #             color = random.choice([(255, 0, 0), (0, 255, 0), (0, 0, 255)])
-        #             cv2.line(image_line, p1_pos, p2_pos, color=(0, 0, 255), thickness=2)
+        image_point = draw_point(image.copy(), box, width=2, color=(255, 0, 0))
+        image_point_gt = draw_point(image.copy(), dataset_test[i][1], width=2, color=(255, 0, 0))
+        # print(box[np.where(box[:, 0] > 0)])
+        image_line = image.copy()
+        for a, b in itertools.combinations(latent[:result_num], 2):
+            relations = model.model.relation_heads(torch.cat((a, b, latent[-1])))
+            if F.sigmoid(relations) > 0.5:
+                p1 = model.model.box_head(a).detach().cpu()
+                p2 = model.model.box_head(b).detach().cpu()
+                if p1[0] >= 0 and p2[0] >= 0:
+                    p1_pos, p2_pos = p1[:2].numpy(), p2[:2].numpy()
+                    p1_pos[1] = 1 - p1_pos[1]
+                    p2_pos[1] = 1 - p2_pos[1]
+                    p1_pos *= 200
+                    p2_pos *= 200
+                    p1_pos = p1_pos.astype(int)
+                    p2_pos = p2_pos.astype(int)
+                    color = random.choice([(255, 0, 0), (0, 255, 0), (0, 0, 255)])
+                    cv2.line(image_line, p1_pos, p2_pos, color=(0, 0, 255), thickness=2)
         # attention_map = get_local.cache["Attention.forward"][0][i][0][0][:25].reshape(5, 5)
-        canvas.append([image, image_point])
+        canvas.append([image, image_point, image_point_gt, image_line])
     visualize_attentions(canvas)
     # pprint(result)
