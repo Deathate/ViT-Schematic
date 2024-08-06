@@ -12,6 +12,7 @@ import logging
 import math
 import os
 import pickle
+import platform
 import random
 import secrets
 import shutil
@@ -20,7 +21,7 @@ import time
 import typing
 from collections import OrderedDict, namedtuple
 from dataclasses import dataclass
-from functools import partial
+from functools import cached_property, partial
 from inspect import signature
 from itertools import chain, count
 from pathlib import Path
@@ -63,8 +64,10 @@ from torchmetrics import Accuracy
 from torchmetrics.classification import MulticlassAccuracy
 from torchvision import models
 from torchvision.ops.boxes import complete_box_iou
+from torchvision.utils import make_grid
 from tqdm import tqdm
 
+import wandb
 from utility import *
 from visualizer import get_local
 
@@ -237,8 +240,8 @@ class MetaData:
 class Model:
     def __init__(
         self,
-        name,
-        data,
+        name="",
+        data=None,
         batch_size=64,
         xtransform=None,
         ytransform=None,
@@ -250,6 +253,7 @@ class Model:
         use_cache=True,
         memory_fraction=1,
         eval=False,
+        config=None,
     ):
         if memory_fraction < 1:
             torch.cuda.set_per_process_memory_fraction(memory_fraction)
@@ -266,7 +270,7 @@ class Model:
         # torch.set_default_device('cuda')
         self.cudalize = cudalize
         self.data = data
-        if not eval:
+        if not eval and data:
             self.dataset = self.preprocessing(data, use_cache, cudalize)
             self.train_dataset, self.test_dataset = torch.utils.data.random_split(
                 self.dataset,
@@ -294,6 +298,17 @@ class Model:
         self.writer = None
         torch.set_float32_matmul_precision("high")
         self.meta: MetaData = None
+        if config is not None:
+            machine_name = platform.node()
+            wandb.require("core")
+            wandb.login(key="dc1e94a79b4faf6ca55ddce9640f3568ef5081a5")
+            wandb.init(
+                # set the wandb project where this run will be logged
+                project=name,
+                name=f"{machine_name}",
+                # track hyperparameters and run metadata
+                config=config,
+            )
 
     def tensorboard_setting(self):
         if self.writer:
@@ -357,8 +372,8 @@ class Model:
     def fit(
         self,
         model,
-        criterion,
-        optimizer,
+        criterion=None,
+        optimizer=None,
         epochs=1,
         max_epochs=99999,
         start_epoch=None,
@@ -367,7 +382,7 @@ class Model:
         early_stopping=False,
         eval_metrics=None,
         training_epoch_end=None,
-        pretrained_path=None,
+        pretrained_path="",
         keep=True,
         backprop_freq=1,
         device_ids=[0],
@@ -382,6 +397,7 @@ class Model:
         backprop_freq = int(backprop_freq)
         previous_epoch = 0
         list_of_files = glob.glob(str(self.log_dir.parent) + "/*")
+        scaler = torch.cuda.amp.GradScaler()
         if pretrained_path == "latest":
             if len(list_of_files) == 0:
                 pretrained_path = ""
@@ -390,25 +406,23 @@ class Model:
                 pretrained_path = latest_file + "/latest.pth"
                 if not Path(pretrained_path).exists():
                     pretrained_path = ""
-        if pretrained_path != "":
+        if pretrained_path:
             print(f'** [Pretrained model loaded] - "{pretrained_path}"')
             checkpoint = torch.load(pretrained_path)
             if isinstance(checkpoint, OrderedDict):
                 model.load_state_dict(checkpoint, strict=False)
                 model = self.parallel(model, device_ids)
             else:
-                lr = optimizer.param_groups[0]["lr"]
                 # it is recommended to move a model to GPU before constructing an optimizer
                 model.load_state_dict(checkpoint["model"], strict=False)
                 model = self.parallel(model, device_ids)
-                if keep_optimizer:
+                if optimizer and keep_optimizer:
                     print("** [Pretrained optimizer loaded]")
                     optimizer.load_state_dict(checkpoint["optimizer"])
-                    if optimizer.param_groups[0]["lr"] != lr:
-                        print(f"** [Optimizer learning rate changed to {lr}]")
-                        optimizer.param_groups[0]["lr"] = lr
                 if checkpoint.get("epoch", False) and keep_epoch:
                     previous_epoch = checkpoint["epoch"] + 1
+                if checkpoint.get("scaler", False) and self.amp:
+                    scaler.load_state_dict(checkpoint["scaler"])
 
         else:
             model = self.parallel(model, device_ids)
@@ -416,7 +430,7 @@ class Model:
         # accelerate training speed
         if compile:
             self.model = torch.compile(self.model, mode="reduce-overhead")
-        if not keep:
+        if not keep or not criterion or not optimizer:
             return
         if id(model) != self.model_id:
             self.model_id = id(model)
@@ -437,10 +451,10 @@ class Model:
             if isinstance(max_epochs, int):
                 max_epochs = int(max_epochs)
             end = min(max_epochs, start + previous_epoch + epochs)
-
-            if self.amp:
-                scaler = torch.cuda.amp.GradScaler()
-            early_stopping_monitor = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=30)
+            if early_stopping:
+                early_stopping_monitor = optim.lr_scheduler.ReduceLROnPlateau(
+                    optimizer, patience=30
+                )
             # scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, min_lr=1e-6)
 
             self.model.train()
@@ -454,22 +468,6 @@ class Model:
                 )
 
             for ep in range(start + previous_epoch, min(end, start + previous_epoch + epochs)):
-
-                def save_model(path, log=False):
-                    torch.save(
-                        {
-                            "model": (
-                                self.model.state_dict()
-                                if len(device_ids) == 1
-                                else self.model.module.state_dict()
-                            ),
-                            "optimizer": optimizer.state_dict(),
-                            "epoch": ep,
-                        },
-                        path,
-                    )
-                    if log:
-                        pbar.write(f'Saved to "{path}".')
 
                 with tqdm(
                     total=len(self.train_loader) // backprop_freq,
@@ -489,27 +487,9 @@ class Model:
                             if not self.cudalize:
                                 data = cudalization(data)
                                 target = cudalization(target)
-                            if self.amp:
-                                with torch.cuda.amp.autocast():
-                                    y_hat = self.model(data, target)
-                                    self.meta = create_meta(seq, ep, "train")
-                                    loss, acc = self.loss(
-                                        y_hat,
-                                        target,
-                                        criterion,
-                                        eval=True,
-                                        target_transform=target_transform,
-                                        eval_metrics=eval_metrics,
-                                    )
-                                    loss = loss / backprop_freq
-                                    acc = acc / backprop_freq
-                                    scaler.scale(loss).backward()
-                                    accum_loss += loss.item()
-                                    accum_acc += acc.item()
-                                    # pbar.write(f"loss: {loss.item()}")
-                            else:
-                                y_hat = self.model(data, target)
-                                self.meta = create_meta(seq, ep)
+                            with torch.autocast("cuda", enabled=self.amp):
+                                y_hat = self.model_forward(data, target)
+                                self.meta = create_meta(seq, ep, "train")
                                 loss, acc = self.loss(
                                     y_hat,
                                     target,
@@ -518,19 +498,16 @@ class Model:
                                     target_transform=target_transform,
                                     eval_metrics=eval_metrics,
                                 )
-                                loss = loss / backprop_freq
-                                acc = acc / backprop_freq
-                                loss.backward()
-                                accum_loss += loss.item()
-                                accum_acc += acc.item()
+                            loss = loss / backprop_freq
+                            acc = acc / backprop_freq
+                            scaler.scale(loss).backward()
+                            accum_loss += loss.item()
+                            accum_acc += acc.item()
+
                             if (batch_num + 1) % backprop_freq == 0:
-                                if self.amp:
-                                    scaler.step(optimizer)
-                                    scaler.update()
-                                    optimizer.zero_grad()
-                                else:
-                                    optimizer.step()
-                                    optimizer.zero_grad()
+                                scaler.step(optimizer)
+                                scaler.update()
+                                optimizer.zero_grad()
                                 # if ep == 0:
                                 #     from torchviz import make_dot
                                 #     graph = make_dot(y_hat, params=dict(model.named_parameters()))
@@ -541,7 +518,7 @@ class Model:
                                 pbar.set_postfix(
                                     {
                                         "TLoss": f"{accum_loss:.3E}",
-                                        "TAcc": f"{accum_acc:.2}" if accum_acc >= 0 else "---",
+                                        "TAcc": f"{accum_acc:.3}" if accum_acc >= 0 else "---",
                                         "VLoss": "---",
                                         "VAcc": "---",
                                     }
@@ -577,47 +554,49 @@ class Model:
                     self.writer.add_scalar("Loss/train", train_loss, ep + 1)
                     self.writer.add_scalar("Acc/train", train_acc, ep + 1)
                     # calculate validation loss
-                    val_loss = []
-                    accs = []
-                    for seq, data, target in self.test_loader:
-                        if not self.cudalize:
-                            data = cudalization(data)
-                            target = cudalization(target)
-                        y_hat = self.predict(data, target)
-                        self.meta = create_meta(seq, ep, mode="val")
-                        loss, acc = self.loss(
-                            y_hat,
-                            target,
-                            criterion,
-                            eval=True,
-                            target_transform=target_transform,
-                            eval_metrics=eval_metrics,
-                        )
-                        val_loss.append(loss)
-                        accs.append(acc)
-                    val_loss = torch.stack(val_loss).mean()
-                    acc = torch.stack(accs).mean()
+                    with torch.no_grad():
+                        val_loss = []
+                        accs = []
+                        for seq, data, target in self.test_loader:
+                            if not self.cudalize:
+                                data = cudalization(data)
+                                target = cudalization(target)
+                            y_hat = self.predict(data, target)
+                            self.meta = create_meta(seq, ep, mode="val")
+                            loss, acc = self.loss(
+                                y_hat,
+                                target,
+                                criterion,
+                                eval=True,
+                                target_transform=target_transform,
+                                eval_metrics=eval_metrics,
+                            )
+                            val_loss.append(loss)
+                            accs.append(acc)
+                        val_loss = torch.stack(val_loss).mean()
+                        acc = torch.stack(accs).mean()
                     self.writer.add_scalar("Loss/validation", val_loss, ep + 1)
                     self.writer.add_scalar("Acc/validation", acc, ep + 1)
-                    latest_path = Path(self.log_dir) / "latest.pth"
-                    save_model(latest_path)
+                    self.save_model(
+                        Path(self.log_dir) / "latest.pth", model, device_ids, optimizer, scaler, ep
+                    )
                     # self.writer.add_scalars('Loss', {'validation': val_loss,
                     #                                  'train': train_loss}, ep + 1)
                     pbar.set_postfix(
                         {
                             "TLoss": f"{train_loss:.3E}",
-                            "TAcc": f"{train_acc:.2}" if train_acc >= 0 else "---",
+                            "TAcc": f"{train_acc:.3}" if train_acc >= 0 else "---",
                             "VLoss": f"{val_loss:.3E}",
-                            "VAcc": f"{acc:.2}" if acc >= 0 else "---",
+                            "VAcc": f"{acc:.3}" if acc >= 0 else "---",
                         }
                     )
                     if val_loss <= best_quantity:
                         best_quantity = val_loss
                         saved_path = Path(self.log_dir) / "best.pth"
-                        save_model(saved_path)
-                        pbar.write(
-                            f'Found a better solution at epoch {ep+1}. Saved to "{saved_path}".'
-                        )
+                        self.save_model(saved_path, model, device_ids, optimizer, scaler, ep)
+                        # pbar.write(
+                        #     f'Found a better solution at epoch {ep+1}. Saved to "{saved_path}".'
+                        # )
                     # scheduler.step(val_loss)
                     self.writer.add_scalar("lr", optimizer.param_groups[0]["lr"], ep + 1)
                     if early_stopping:
@@ -630,7 +609,7 @@ class Model:
         except KeyboardInterrupt:
             print("Keyboard interrupt received.")
             self.interrupt = True
-            if ep < 5:
+            if ep - previous_epoch < 20:
                 print("Removing log directory")
                 shutil.rmtree(self.writer.log_dir)
 
@@ -640,6 +619,25 @@ class Model:
         print("----------- Training finished -----------")
         print()
 
+    def model_forward(self, x, y):
+        if self.model.forward.__code__.co_argcount == 2:
+            return self.model(x)
+        else:
+            return self.model(x, y)
+
+    def save_model(self, path, model, device_ids, optimizer, scaler, ep):
+        torch.save(
+            {
+                "model": (
+                    model.state_dict() if len(device_ids) == 1 else model.module.state_dict()
+                ),
+                "optimizer": optimizer.state_dict(),
+                "scaler": scaler.state_dict(),
+                "epoch": ep,
+            },
+            path,
+        )
+
     def parallel(self, model, device_ids):
         if len(device_ids) > 1:
             return nn.DataParallel(model, device_ids=list(range(len(device_ids)))).cuda()
@@ -648,7 +646,7 @@ class Model:
 
     @torch.no_grad()
     def predict(self, data: torch.tensor, target: torch.tensor):
-        return self.model(data, target)
+        return self.model_forward(data, target)
 
     # def __call__(self, data, target):
     #     return self.predict(self.xtransform(data), self.ytransform(target).unsqueeze(0).unsqueeze(0).cuda())
@@ -662,10 +660,13 @@ class Model:
         loader = DataLoader(dataset=testset, batch_size=len(testset))
         x = next(iter(loader))[1]
         y = next(iter(loader))[2]
+        prediction = self.predict(x, y)
+        if isinstance(prediction, tuple):
+            prediction = prediction[0]
         if verbose:
-            ret = list(zip(x, self.predict(x, y), y))
+            ret = list(zip(x, prediction, y))
         else:
-            ret = self.predict(x, y)
+            ret = prediction
         return ret
 
     # def __call__(self, x, y) -> gc.Any:
@@ -687,9 +688,9 @@ class Model:
         else:
             result = criterion(y_hat, y)
             if isinstance(result, tuple):
-                return result[0], -1
+                return result[0], torch.tensor(-1.0)
             else:
-                return result, -1
+                return result, torch.tensor(-1.0)
 
     @property
     def weight(self):
@@ -1001,6 +1002,21 @@ def reshape_to_square(image, desired_size, color=(255, 255, 255), verbose=False)
         return result
 
 
+def padding(img, size):
+    h, w, c = img.shape
+    img_pad = np.pad(
+        img,
+        (
+            (size - (h % size) if h % size != 0 else 0, 0),
+            (0, (size - (w % size) if w % size != 0 else 0)),
+            (0, 0),
+        ),
+        mode="constant",
+        constant_values=255,
+    )
+    return img_pad
+
+
 def draw_bounding_boxes(img, box, width=2):
     img = img.copy()
     box = box.copy()
@@ -1067,6 +1083,20 @@ def draw_line(img, box):
     for b in box:
         cv2.line(img, b[0], b[1], (0, 0, 255), 2)
     return img
+
+
+def create_grid(
+    images, **args
+):
+    p = []
+    for image in images:
+        s = torch.tensor(image)
+        s = s.permute(2, 0, 1)
+        p.append(s)
+    p = torch.stack(p)
+    fimg = make_grid(p, **args)
+    fimg = fimg.permute(1, 2, 0).numpy()
+    return fimg
 
 
 def get_lr(optimizer):
