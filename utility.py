@@ -281,9 +281,10 @@ def plot_images(images, img_width=None, max_images=5, parallel=False, parallel_s
         for image in images:
             with tempfile.NamedTemporaryFile(suffix=".png") as f:
                 cv2.imwrite(f.name, image)
-                os.system(
-                    f"convert {f.name} -resize {img_width if img_width else 200} -alpha off sixel:-"
-                )
+                # os.system(
+                #     f"convert {f.name} -resize {img_width if img_width else 200} -alpha off sixel:-"
+                # )
+                os.system(f"img2sixel -w{img_width if img_width else 200} {f.name}")
                 print()
         return
     images = images[:max_images]

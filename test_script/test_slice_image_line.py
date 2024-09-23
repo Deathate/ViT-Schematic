@@ -73,9 +73,10 @@ def analyze_connection(path, debug=False):
         xtransform=xtransform,
         log2console=False,
     )
+    working_dir = Path(__file__).parent.parent
     model.fit(
         create_model(),
-        pretrained_path="weights/mix_best.pth",
+        pretrained_path=working_dir / "weights/mix_best.pth",
     )
     model_l = Model(
         xtransform=xtransform,
@@ -83,7 +84,7 @@ def analyze_connection(path, debug=False):
     )
     model_l.fit(
         create_model(),
-        pretrained_path="weights/line_best.pth",
+        pretrained_path=working_dir / "weights/line_best.pth",
     )
     slice_size = 50
     interval = 1
@@ -251,4 +252,4 @@ if __name__ == "__main__":
     path = "dataset_fullimg_mask/images/circuit" + img_name[0] + ".png"
     print(path)
     group_connection, img = analyze_connection(cv2.imread(path, cv2.IMREAD_UNCHANGED), debug=False)
-    plot_images(img, 500)
+    plot_images(img, 700)
