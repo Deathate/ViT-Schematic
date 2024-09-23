@@ -1,0 +1,1 @@
+code data_distribution_50/wo_mask_w_line/images/"$1"*
