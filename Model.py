@@ -219,7 +219,7 @@ class Model:
         if self.ytransform is None:
             self.ytransform = lambda x: torch.tensor(x).float().cuda()
         if torch.cuda.device_count() > 1:
-            with HiddenPrints(not log2console):
+            with HiddenPrints(log2console):
                 select_gpu_with_most_free_memory()
         # torch.set_default_device('cuda')
         self.cudalize = cudalize
