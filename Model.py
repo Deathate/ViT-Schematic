@@ -222,7 +222,7 @@ class Model:
         if self.ytransform is None:
             self.ytransform = lambda x: torch.tensor(x).float().cuda()
         if torch.cuda.device_count() > 1:
-            select_gpu_with_most_free_memory()
+            select_gpu_with_most_free_memory(log2console)
         # torch.set_default_device('cuda')
         self.cudalize = cudalize
         self.data = data
