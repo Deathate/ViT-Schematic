@@ -88,13 +88,18 @@ def exit():
 
 
 class HiddenPrints:
+    def __init__(self, disable=False):
+        self.disable = disable
+
     def __enter__(self):
-        self._original_stdout = sys.stdout
-        sys.stdout = open(os.devnull, "w")
+        if not self.disable:
+            self._original_stdout = sys.stdout
+            sys.stdout = open(os.devnull, "w")
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        sys.stdout.close()
-        sys.stdout = self._original_stdout
+        if not self.disable:
+            sys.stdout.close()
+            sys.stdout = self._original_stdout
 
 
 class Timer:
