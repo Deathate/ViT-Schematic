@@ -4,29 +4,30 @@ from utility import *
 # sys.path.append(".." if ("ipykernel" in sys.modules) else ".")
 
 
-def select_gpu_with_most_free_memory():
-    print()
-    print("#" * 50)
+def select_gpu_with_most_free_memory(log2console=True):
     import pynvml
 
     pynvml.nvmlInit()
     deviceCount = pynvml.nvmlDeviceGetCount()
-    print(f"GPU Available: {torch.cuda.is_available()}")
-    print(f"CUDA_VISIBLE_DEVICES: {deviceCount}")
+    if log2console:
+        print("#" * 50)
+        print(f"GPU Available: {torch.cuda.is_available()}")
+        print(f"CUDA_VISIBLE_DEVICES: {deviceCount}")
     memory = 0
     device = 0
     for i in range(deviceCount):
         handle = pynvml.nvmlDeviceGetHandleByIndex(i)
         info = pynvml.nvmlDeviceGetMemoryInfo(handle)
-        print("- DEVICE:", i)
-        print(f"  TOTAL: {int(info.total / 1024**2)}, FREE: {int(info.free / 1024**2)}")
+        if log2console:
+            print("- DEVICE:", i)
+            print(f"  TOTAL: {int(info.total / 1024**2)}, FREE: {int(info.free / 1024**2)}")
         if info.free > memory:
             memory = info.free
             device = i
     os.environ["CUDA_VISIBLE_DEVICES"] = str(device)
-    print(f"Using GPU: [{device}]")
-    print("#" * 50)
-    print()
+    if log2console:
+        print(f"Using GPU: [{device}]")
+        print("#" * 50)
 
 
 rng = np.random.default_rng()
