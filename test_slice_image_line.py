@@ -1,6 +1,3 @@
-import sys
-
-sys.path.insert(0, ".")
 from main_line import *
 from Model import *
 
@@ -58,6 +55,14 @@ def legalize_line(lines):
             line[1, 0] = 1
         if line[1, 1] > 1 - r:
             line[1, 1] = 1
+        if abs(line[0, 0] - line[1, 0]) < abs(line[0, 1] - line[1, 1]):
+            m = (line[0, 0] + line[1, 0]) / 2
+            line[0, 0] = m
+            line[1, 0] = m
+        else:
+            m = (line[0, 1] + line[1, 1]) / 2
+            line[0, 1] = m
+            line[1, 1] = m
         lines[j] = line
     new_lines = []
     for line in lines:
@@ -73,10 +78,9 @@ def analyze_connection(path, debug=False):
         xtransform=xtransform,
         log2console=False,
     )
-    working_dir = Path(__file__).parent.parent
     model.fit(
         create_model(),
-        pretrained_path=working_dir / "weights/mix_best.pth",
+        pretrained_path="weights/mix_best.pth",
     )
     model_l = Model(
         xtransform=xtransform,
@@ -84,7 +88,7 @@ def analyze_connection(path, debug=False):
     )
     model_l.fit(
         create_model(),
-        pretrained_path=working_dir / "weights/line_best.pth",
+        pretrained_path="weights/line_best.pth",
     )
     slice_size = 50
     interval = 1
@@ -105,14 +109,18 @@ def analyze_connection(path, debug=False):
     dataset = TestWindowed(path, interval, slice_size)
 
     def predict_mask_img(img):
+        img = img.copy()
         tmp = OneTimeWrapper(img)
         result = model.inference(tmp, verbose=False)
+        result = legalize_line(result[0].cpu().numpy())
         return result
 
     def predict_line_only_img(img):
-        dataset[i][0][:, :, 3] = 255
+        img = img.copy()
+        img[:, :, 3] = 255
         tmp = OneTimeWrapper(img)
         result = model_l.inference(tmp, verbose=False)
+        result = legalize_line(result[0].cpu().numpy())
         return result
 
     # plot_images(ori_img, 700)
@@ -151,47 +159,57 @@ def analyze_connection(path, debug=False):
         if image_without_mask.size != 0 and image_without_mask.mean() / 255 <= 0.999:
             r = int(0.025 * image.shape[0])
             slice_image = image[r:-r, r:-r]
+            mode = -1
             lines = []
-            if slice_image.mean() < 254:
-                if mask.mean() > 254 and slice_image.mean() < 250:
-                    lines = predict_line_only_img(dataset[i][0])[0].cpu().numpy()
-                else:
-                    lines = predict_mask_img(dataset[i][0])[0].cpu().numpy()
+            if mask.mean() >= 254:
+                lines = predict_line_only_img(dataset[i][0])
+                mode = 1
+            else:
+                lines = predict_mask_img(dataset[i][0])
+                mode = 2
+            # if [row_idx, col_idx] == [1, 9]:
+            #     # plot_images(image, 300)
+            #     print(lines)
+            #     print(mode)
+            #     print("line only")
+            #     l = predict_line_only_img(dataset[i][0])
+            #     plot_images(draw_line(dataset[i][0].copy(), l, thickness=1), 300)
+            #     print("mask")
+            #     l = predict_mask_img(dataset[i][0])
+            #     plot_images(draw_line(dataset[i][0].copy(), l, thickness=1), 300)
 
-                lines = legalize_line(lines)
-                lines = np.array(lines)
-                connection = build_connection(
-                    lines,
-                    norm1,
-                    similar_threshold=0.02,
-                    threshold=0.05,
-                    duplicate_threshold=1e-3,
-                )
-                connection = list(filter(lambda x: len(x) > 0, connection))
-                for j, group in enumerate(connection):
-                    color = color_map(j + 1)
-                    # image = draw_rect(image, group, color=color, width=8)
-                    group = np.array(group)
-                    group[:, 0] = group[:, 0] * slice_size + anchor[0]
-                    group[:, 1] = group[:, 1] * slice_size + anchor[1]
-                    group[:, 0] /= ori_img.shape[1]
-                    group[:, 1] /= ori_img.shape[0]
-                    global_connection.append(group.tolist())
-                for line in lines:
-                    image = draw_line(image, [line], thickness=1)
-                    line[0][0] = anchor[0] + line[0][0] * slice_size
-                    line[0][1] = anchor[1] + line[0][1] * slice_size
-                    line[1][0] = anchor[0] + line[1][0] * slice_size
-                    line[1][1] = anchor[1] + line[1][1] * slice_size
-                    line[:, 0] /= ori_img.shape[1]
-                    line[:, 1] /= ori_img.shape[0]
-                    global_line.append(line.tolist())
+            #     print(mask.mean())
+            #     print(slice_image.mean())
+            #     plot_images(draw_line(dataset[i][0].copy(), lines, thickness=1), 300)
+            #     exit()
 
-        # if row_idx == 6 and col_idx == 0:
-        #     plot_images(image, 600)
-        #     print(lines)
-        #     print(slice_image.mean())
-        #     exit()
+            connection = build_connection(
+                lines,
+                norm1,
+                similar_threshold=0.02,
+                threshold=0.05,
+                duplicate_threshold=1e-3,
+            )
+            connection = list(filter(lambda x: len(x) > 0, connection))
+            for j, group in enumerate(connection):
+                color = color_map(j + 1)
+                # image = draw_rect(image, group, color=color, width=8)
+                group = np.array(group)
+                group[:, 0] = group[:, 0] * slice_size + anchor[0]
+                group[:, 1] = group[:, 1] * slice_size + anchor[1]
+                group[:, 0] /= ori_img.shape[1]
+                group[:, 1] /= ori_img.shape[0]
+                global_connection.append(group.tolist())
+            if len(lines) > 0:
+                image = draw_line(image, lines, thickness=1)
+            for line in lines:
+                line[0][0] = anchor[0] + line[0][0] * slice_size
+                line[0][1] = anchor[1] + line[0][1] * slice_size
+                line[1][0] = anchor[0] + line[1][0] * slice_size
+                line[1][1] = anchor[1] + line[1][1] * slice_size
+                line[:, 0] /= ori_img.shape[1]
+                line[:, 1] /= ori_img.shape[0]
+                global_line.append(line.tolist())
 
         # image = np.concatenate((image, mask), axis=-1)
         # if row_idx == 6 and 0 <= col_idx <= 5:
@@ -200,22 +218,22 @@ def analyze_connection(path, debug=False):
             image_set.append(image)
 
     group_connection = build_connection(
-        global_connection, norm1, similar_threshold=0, threshold=0.02, duplicate_threshold=0.01
+        global_connection, norm1, similar_threshold=0, threshold=0.01, duplicate_threshold=0.01
     )
     if debug:
-        plot_images(ori_img, 500)
+        plot_images(ori_img, 800)
         fimg = create_grid(
             image_set,
             nrow=num_column,
             padding=5,
             pad_value=127,
         )
-        # fimg = cv2.cvtColor(fimg, cv2.COLOR_BGRA2BGR)
-        plot_images(fimg, 500)
+        plot_images(fimg, 800)
+        # exit()
 
         img = np.full(ori_img.shape, 255, np.uint8)
         img = draw_line(img, global_line, endpoint=True, endpoint_thickness=4)
-        plot_images(img, 400)
+        plot_images(img, 800)
         # plot_images(debug_image, 200)
 
         # for i, group in enumerate(global_connection):
@@ -229,12 +247,12 @@ def analyze_connection(path, debug=False):
         process_images = []
         for i, group in enumerate(group_connection):
             img = img_bk.copy()
-            img = draw_rect(img, group, color=(192, 91, 22), width=10)
+            img = draw_rect(img, group, color=(192, 91, 22), width=5)
             process_images.append(img.copy())
-        plot_images(process_images, img_width=400)
+        plot_images(process_images, img_width=800)
     for i, group in enumerate(group_connection):
         color = color_map(i)
-        ori_img = draw_rect(ori_img, group, color=color, width=10)
+        ori_img = draw_rect(ori_img, group, color=color, width=5)
     return group_connection, ori_img
     # save_path = "tmp/" + "circuit" + str(img_names[img_name_id]) + ".png"
     # save_path = Path(save_path)
@@ -249,7 +267,7 @@ if __name__ == "__main__":
     img_name = [img_names[6]]
     # img_names = ("24023 24167 24348").split()[-2:]
     # img_names = ("24023").split()
+    path = "dataset_fullimg_mask/images/circuit16176.png"
     path = "dataset_fullimg_mask/images/circuit" + img_name[0] + ".png"
-    print(path)
-    group_connection, img = analyze_connection(cv2.imread(path, cv2.IMREAD_UNCHANGED), debug=False)
-    plot_images(img, 700)
+    group_connection, img = analyze_connection(cv2.imread(path, cv2.IMREAD_UNCHANGED), debug=True)
+    plot_images(img, 800)
