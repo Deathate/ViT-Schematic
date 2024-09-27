@@ -1,31 +1,38 @@
 import platform
 
 machine_name = platform.node()
-# for aieda lab machine
 DEPTH = 6
 NUM_HEADS = 4
 EMBED_DIM = 32
 # PRETRAINED_PATH = "runs/FormalDatasetWindowedLinePair/0912_17-40-37/best.pth"
-PRETRAINED_PATH = "runs/FormalDatasetWindowedLinePair/0914_22-49-35/best.pth"
-KEEP_OPTIMIZER = True
-KEEP_EPOCH = True
+PRETRAINED_PATH = "runs/FormalDatasetWindowedLinePair/0919_04-16-20/best.pth"
+# runs/FormalDatasetWindowedLinePair/0925_01-02-38
+KEEP_OPTIMIZER = False
+KEEP_EPOCH = False
 LEARNING_RATE = 1e-4
 EPOCHS = 100000
 BATCH_SIZE = 32
 BATCH_STEP = 128 / BATCH_SIZE
 DEVICE_IDS = [0]
 DROPOUT = 0
-DATASET_PATH = [
-    "data_distribution_50/w_mask_w_line",
-    "data_distribution_50/wo_mask_w_line",
-]
+STYLE = "mask"
+if STYLE == "mask":
+    DATASET_PATH = [
+        "data_distribution_50/w_mask_w_line",
+        "data_distribution_50/wo_mask_w_line",
+    ]
+    DATASET_SIZE = [-1, 0]
+elif STYLE == "line":
+    DATASET_PATH = [
+        "data_distribution_50/w_mask_w_line",
+        "data_distribution_50/wo_mask_w_line",
+    ]
+    DATASET_SIZE = [0, -1]
 IMAGE_SIZE = 50
 PATCH_SIZE = 10
-DETERMINISTIC = False
 
 # DATASET_SIZE = [1200, 800]
 # DATASET_SIZE = [120000, 120000]
-DATASET_SIZE = [0, -1]
 
 EVAL = False
 if EVAL:

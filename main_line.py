@@ -1,6 +1,4 @@
-# %%
 # https://ncps.readthedocs.io/en/latest/examples/atari_bc.html
-from mambapy.mamba import Mamba, MambaConfig
 from shapely import LineString, box, intersects
 
 import main_line_config as config
@@ -8,9 +6,9 @@ from Model import *
 
 # from vit import Transformer
 
-ctr = defaultdict(lambda: 5)
 
 Datasetbehaviour.RESET = True
+
 
 bad_image_dir = Path("bad_images")
 shutil.rmtree(bad_image_dir, ignore_errors=True)
@@ -21,15 +19,14 @@ good_image_dir.mkdir(exist_ok=True)
 num_bad_image = 0
 num_good_image = 0
 
-# Datasetbehaviour.RESET = True
-
 
 class FormalDatasetWindowedLinePair(Datasetbehaviour):
     def __init__(self, size, dataset_source):
         self.dataset_source = dataset_source
         self.dataset_folder = Path(self.dataset_source) / Path("pkl")
         self.dataset_list = list(self.dataset_folder.iterdir())
-        random.shuffle(self.dataset_list)
+        self.dataset_list.sort()
+        # random.shuffle(self.dataset_list)
         if size == -1:
             size = len(self.dataset_list)
         self.dataset_list = self.dataset_list[:size]
@@ -41,66 +38,87 @@ class FormalDatasetWindowedLinePair(Datasetbehaviour):
         path = self.dataset_list[self.i]
         self.i += 1
         data = pickle.load(open(path, "rb"))
-        img = cv2.imread(
-            self.dataset_source + "/images/" + Path(path).stem + ".png", cv2.IMREAD_UNCHANGED
-        )
+        img_path = self.dataset_source + "/images/" + Path(path).stem + ".png"
+        img = cv2.imread(img_path, cv2.IMREAD_UNCHANGED)
         img_height, img_width = img.shape[:2]
         # print(path)
         line_set = list(chain.from_iterable(data.values()))
+
+        global num_bad_image, num_good_image
         line_set = list(filter(lambda x: len(x) == 2, line_set))
         for line in line_set:
             line[0] = (line[0][0] / img_width, line[0][1] / img_height)
             line[1] = (line[1][0] / img_width, line[1][1] / img_height)
-        r = 0.025
+        r = 0.005
         b = box(r, r, 1 - r, 1 - r)
         line_set = list(filter(lambda x: intersects(LineString(x), b), line_set))
-        # if Path(path).stem.startswith("circuit575_4_8"):
-        #     plot_images(img)
-        #     print(line_set)
-        #     exit()
-        img[:, :, 3] = 255
-        global num_bad_image, num_good_image
-        if img[:, :, :3].min() > 180 or len(line_set) == 0:
-            out_dir = bad_image_dir / str(self.i // 1000)
-            out_dir.mkdir(exist_ok=True)
-            out_path = out_dir / (Path(path).stem + ".png")
-            cv2.imwrite(str(out_path), cv2.resize(img, (256, 256)))
-            num_bad_image += 1
-            return None
-        # else:
-        #     split_dir = good_image_dir / str(num_good_image // 1000)
-        #     split_dir.mkdir(exist_ok=True)
-        #     out_path = str(split_dir / (Path(path).stem + ".png"))
-        #     cv2.imwrite(out_path, cv2.resize(img, (256, 256)))
-        #     num_good_image += 1
+        if config.STYLE == "line":
+            # if Path(path).stem.startswith("circuit575_4_8"):
+            #     plot_images(img)
+            #     print(line_set)
+            #     exit()
+            img[:, :, 3] = 255
+            if img.mean() == 255:
+                return None
 
-        # if Path(path).stem == "circuit2095_5_1":
-        #     plot_images(img)
-        #     print(line_set)
-        #     exit()
+            non_white_pixels_coordinates = (img != 255).nonzero()
+
+            non_white_pixel_range = (
+                non_white_pixels_coordinates[1].max()
+                - non_white_pixels_coordinates[1][0].min()
+                + non_white_pixels_coordinates[0].max()
+                - non_white_pixels_coordinates[0].min()
+            )
+
+            if len(line_set) == 0 or non_white_pixel_range < 5:
+                return None
+                out_dir = bad_image_dir / str(self.i // 1000)
+                out_dir.mkdir(exist_ok=True)
+                out_path = out_dir / (Path(path).stem + ".png")
+                cv2.imwrite(str(out_path), cv2.resize(img, (256, 256)))
+                num_bad_image += 1
+                if num_bad_image == 500:
+                    exit()
+                return None
+            # else:
+            #     split_dir = good_image_dir / str(num_good_image // 1000)
+            #     split_dir.mkdir(exist_ok=True)
+            #     out_path = str(split_dir / (Path(path).stem + ".png"))
+            #     cv2.imwrite(out_path, cv2.resize(img, (256, 256)))
+            #     num_good_image += 1
+
+            # if Path(path).stem == "circuit2095_5_1":
+            #     plot_images(img)
+            #     print(line_set)
+            #     exit()
+        elif config.STYLE == "mask":
+            if len(line_set) == 0:
+                return None
+            line_set = list(filter(lambda x: norm1(*x) > 0.05, line_set))
+            # if Path(path).stem == "circuit2326_1_11":
+            #     print(img_path)
+            #     plot_images(draw_line(img, line_set, thickness=1))
+            #     print(line_set)
+            #     exit()
+
+            # split_dir = good_image_dir / str(num_good_image // 1000)
+            # split_dir.mkdir(exist_ok=True)
+            # out_path = str(split_dir / (Path(path).stem + ".png"))
+            # cv2.imwrite(out_path, cv2.resize(img, (256, 256)))
+            # num_good_image += 1
+            # if num_good_image == 500:
+            #     exit()
+
+            # opaque_mask = img[:, :, -1] != 255
+            # image_without_alpha = img[:, :, :3].copy()
+            # image_without_alpha[opaque_mask.nonzero()] = (50, 50, 50)
+            # plot_images(img, 300)
+            # exit()
+        else:
+            raise ValueError("STYLE must be either 'line' or 'mask'")
         if len(line_set) > self.max_num_points:
             self.max_num_points = len(line_set)
             # print(self.max_num_points)
-        # print(img[:, :, :3].mean())
-        # print(line_set)
-        # print(path)
-        # plot_images(img)
-        # exit()
-        # if len(line_set) > 0:
-        #     if ctr[len(line_set)] > 0:
-        #         ctr[len(line_set)] -= 1
-        #         parent = Path("line_sg") / Path(str(len(line_set)))
-        #         parent.mkdir(parents=True, exist_ok=True)
-        #         p = parent / (Path(path).stem + ".json")
-        #         with open(p, "w") as f:
-        #             json.dump(line_set, f)
-        # if self.i > 5:
-        #     # plot_images(img)
-        #     # print(json.dumps(line_set))
-        #     print(len(line_set))
-        #     print(line_set)
-        #     if self.i == 10:
-        #         exit()
         return img, line_set, path
 
 
@@ -219,24 +237,22 @@ def create_model(**kwargs):
 
 def Hungarian_Order(g1b, g2b):
     indices = []
-    # torch.Size([32, 15, 2, 2])
-    # C = np.zeros((g1b.shape[0], g1b.shape[1], g1b.shape[1]))
-    # for idx, (g1, g2) in enumerate(zip(g1b, g2b)):
-    #     for i in range(g1.shape[0]):
-    #         for j in range(g2.shape[0]):
-    #             C[idx, i, j] = calculate_cost(g1[i], g2[j])
+
     C1 = torch.cdist(g1b[:, :, 0], g2b[:, :, 0]) + torch.cdist(g1b[:, :, 1], g2b[:, :, 1])
     C2 = torch.cdist(g1b[:, :, 0], g2b[:, :, 1]) + torch.cdist(g1b[:, :, 1], g2b[:, :, 0])
     C3 = torch.min(C1, C2).cpu().detach()
-    # print(C[0][0])
-    # print(C1[0])
-    # print(C2[0])
-    # print(C3[0])
-    # exit()
+
     indices = [linear_sum_assignment(c)[1] for c in C3]
     for i in range(len(indices)):
         ind = indices[i]
         g2b[i] = g2b[i][ind]
+    # 32 15 2 2
+    C1 = torch.abs(g1b[:, :, 0] - g2b[:, :, 0]) + torch.abs(g1b[:, :, 1] - g2b[:, :, 1])
+    C1 = C1.sum(dim=2)
+    C2 = torch.abs(g1b[:, :, 0] - g2b[:, :, 1]) + torch.abs(g1b[:, :, 1] - g2b[:, :, 0])
+    C2 = C2.sum(dim=2)
+    min_index = C1 > C2
+    g2b[min_index] = g2b[min_index][:, [1, 0]]
 
 
 def criterion(y_hat, y):
@@ -253,16 +269,12 @@ def eval_metrics(criterion, y_hat, y):
 
 
 def main():
-    if config.DETERMINISTIC:
-        set_seed(0, True)
-    else:
-        set_seed(0, False)
     network = create_model()
     Datasetbehaviour.MP = False
     if isinstance(config.DATASET_SIZE, list):
         datasets = []
         for a, b in zip(config.DATASET_SIZE, config.DATASET_PATH):
-            # Datasetbehaviour.RESET = True
+            Datasetbehaviour.RESET = True
             datasets.append(FormalDatasetWindowedLinePair(a, b))
             print(a, b, len(datasets[-1]))
         # exit()
@@ -308,4 +320,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-# %%

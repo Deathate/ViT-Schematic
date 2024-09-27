@@ -1,21 +1,8 @@
-import random
+from utility import *
 
-import wandb
-
-
-api = wandb.Api()
-run = api.run("ho-aron0105-deathate/FormalDatasetWindowed/mfxaa542")
-for artifact in run.logged_artifacts():
-    if "latest" not in artifact.aliases:
-        print(artifact.name, artifact.type)
-    # if "latest" in artifact.name:
-    #     names.append(artifact.name)
-# exit()
-# # if artifact.type == "dataset":
-# #     artifact.delete(delete_aliases=True)
-# run = api.run("ho-aron0105-deathate/FormalDatasetWindowed/6gnt4fcs")
-# api = wandb.Api(overrides={"project": "FormalDatasetWindowed", "entity": "ho-aron0105-deathate"})
-# names = []
-# for v in api.artifact_versions("model", "run-6uwwo57l-best.pth"):
-#     print(v.aliases)
-# exit()
+a = [
+    np.array([[1, 2, 3]]),
+    np.array([[4, 5, 6], [7, 8, 9]]),
+]
+b = np.array(a, dtype=object)
+print(b[:,0])

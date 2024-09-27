@@ -159,6 +159,8 @@ class Datasetbehaviour:
             self.__load()
         if len(self.__dataset) == 0:
             self.__dataset = instance.dataset()
+        elif len(instance.dataset()) == 0:
+            pass
         else:
             self.__dataset = np.concatenate([self.__dataset, instance.dataset()], axis=0)
         return self
@@ -208,6 +210,7 @@ class Model:
         memory_fraction=1,
         eval=False,
         log2console=True,
+        seed=42,
     ):
         if memory_fraction < 1:
             torch.cuda.set_per_process_memory_fraction(memory_fraction)
@@ -221,11 +224,14 @@ class Model:
         # torch.set_default_device('cuda')
         self.cudalize = cudalize
         self.data = data
+        self.log2console = log2console
         if not eval and data:
             self.dataset = self.preprocessing(data, use_cache, cudalize)
+            generator = torch.Generator().manual_seed(seed)
             self.train_dataset, self.test_dataset = torch.utils.data.random_split(
                 self.dataset,
                 [tn := int(len(self.dataset) * (1 - validation_split)), len(self.dataset) - tn],
+                generator=generator,
             )
             self.train_loader = DataLoader(
                 dataset=self.train_dataset,
@@ -249,7 +255,6 @@ class Model:
         self.writer = None
         torch.set_float32_matmul_precision("high")
         self.meta: MetaData = None
-        self.log2console = log2console
 
     def print(self, *args):
         if self.log2console:

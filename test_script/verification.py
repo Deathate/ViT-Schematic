@@ -11,7 +11,7 @@ if isinstance(config.DATASET_SIZE, list):
         "data_distribution_50/w_mask_w_line",
         "data_distribution_50/wo_mask_w_line",
     ]
-    DATASET_SIZE = [0, 2000]
+    DATASET_SIZE = [2000, 0]
     datasets = []
     for a, b in zip(DATASET_SIZE, DATASET_PATH):
         datasets.append(FormalDatasetWindowedLinePair(a, b))
@@ -71,7 +71,7 @@ def eval_metrics(criterion, y_hat, y):
 
 
 network = create_model()
-PT = "runs/FormalDatasetWindowedLinePair/0914_22-49-35/best.pth"
+PT = "runs/FormalDatasetWindowedLinePair/0925_01-40-08/best.pth"
 model.fit(
     network,
     criterion,

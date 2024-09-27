@@ -61,6 +61,7 @@ from PIL import Image, ImageOps
 from plotly.subplots import make_subplots
 from rich import print as print_tmp
 from scipy.optimize import linear_sum_assignment
+from scipy.spatial import distance
 from shapely import ops, union, union_all
 from shapely.geometry import LineString, MultiLineString, MultiPoint, Point, Polygon
 from sklearn.metrics import accuracy_score, classification_report
@@ -119,6 +120,12 @@ def benchmark(func, times=1000000):
 
 @njit
 def norm1(p1, p2):
+    x1, y1 = p1
+    x2, y2 = p2
+    return abs(x1 - x2) + abs(y1 - y2)
+
+
+def norm1_s(p1, p2):
     x1, y1 = p1
     x2, y2 = p2
     return abs(x1 - x2) + abs(y1 - y2)
@@ -284,6 +291,7 @@ def plot_images(images, img_width=None, max_images=5, parallel=False, parallel_s
                 # os.system(
                 #     f"convert {f.name} -resize {img_width if img_width else 200} -alpha off sixel:-"
                 # )
+                print()
                 os.system(f"img2sixel -w{img_width if img_width else 200} {f.name}")
                 print()
         return
@@ -427,8 +435,7 @@ def draw_rect(img, box, width=4, color=(0, 255, 0), scale=True):
         box = box.detach().cpu().numpy()
     else:
         box = np.array(box)
-    img_width = img.shape[1]
-    img_height = img.shape[0]
+    img_height, img_width = img.shape[0], img.shape[1]
     if scale:
         box[..., 1] = 1 - box[..., 1]
         box[..., 0] *= img_width
