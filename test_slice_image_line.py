@@ -1,3 +1,4 @@
+# %%
 from collect_connection import build_connection
 from main_line import *
 from Model import *
@@ -39,7 +40,7 @@ class OneTimeWrapper(Datasetbehaviour):
 
 def legalize_line(lines):
     for j, line in enumerate(lines):
-        r = 0.01
+        r = 0.03
         if line[0, 0] < r:
             line[0, 0] = 0
         if line[0, 1] < r:
@@ -73,25 +74,45 @@ def legalize_line(lines):
     return new_lines
 
 
+current_dir = Path(__file__).parent
+model = Model(
+    xtransform=xtransform,
+    log2console=False,
+)
+model.fit(
+    create_model(),
+    pretrained_path=current_dir / "weights/mix_best.pth",
+)
+model_l = Model(
+    xtransform=xtransform,
+    log2console=False,
+)
+model_l.fit(
+    create_model(),
+    pretrained_path=current_dir / "weights/line_best.pth",
+)
+
+
+def predict_mask_img(img):
+    img = img.copy()
+    tmp = OneTimeWrapper(img)
+    result = model.inference(tmp, verbose=False)
+    result = legalize_line(result[0].cpu().numpy())
+    return result
+
+
+def predict_line_only_img(img):
+    img = img.copy()
+    img[:, :, 3] = 255
+    tmp = OneTimeWrapper(img)
+    result = model_l.inference(tmp, verbose=False)
+    result = legalize_line(result[0].cpu().numpy())
+    return result
+
+
+# %%
 @torch.no_grad()
-def analyze_connection(path, debug=False):
-    current_dir = Path(__file__).parent
-    model = Model(
-        xtransform=xtransform,
-        log2console=False,
-    )
-    model.fit(
-        create_model(),
-        pretrained_path=current_dir / "weights/mix_best.pth",
-    )
-    model_l = Model(
-        xtransform=xtransform,
-        log2console=False,
-    )
-    model_l.fit(
-        create_model(),
-        pretrained_path=current_dir / "runs/FormalDatasetWindowedLinePair/0925_11-13-18/best.pth",
-    )
+def analyze_connection(path, debug=False, debug_cell=[0, 0]):
     slice_size = 50
     interval = 1
     if not isinstance(path, str):
@@ -99,6 +120,13 @@ def analyze_connection(path, debug=False):
             cv2.imwrite(f.name, path)
             path = f.name
     ori_img = padding(cv2.imread(path, cv2.IMREAD_UNCHANGED), slice_size)
+    # print(ori_img.shape)
+    # gray_scale = cv2.cvtColor(ori_img, cv2.COLOR_BGR2GRAY) / 255
+    # plot_images(gray_scale, 800)
+    # x = np.sum(gray_scale, axis=1)
+    # sns.barplot(x)
+    # # print(x)
+    # exit()
     num_column = math.ceil(ori_img.shape[1] / slice_size)
     num_row = math.ceil(ori_img.shape[0] / slice_size)
     # path = "dataset_50x50/data_distribution_50/w_mask_w_line/images/circuit" + img_names[img_name_id] + ".png"
@@ -109,21 +137,6 @@ def analyze_connection(path, debug=False):
     # print(path)
     # with HiddenPrints():
     dataset = TestWindowed(path, interval, slice_size)
-
-    def predict_mask_img(img):
-        img = img.copy()
-        tmp = OneTimeWrapper(img)
-        result = model.inference(tmp, verbose=False)
-        result = legalize_line(result[0].cpu().numpy())
-        return result
-
-    def predict_line_only_img(img):
-        img = img.copy()
-        img[:, :, 3] = 255
-        tmp = OneTimeWrapper(img)
-        result = model_l.inference(tmp, verbose=False)
-        result = legalize_line(result[0].cpu().numpy())
-        return result
 
     # plot_images(ori_img, 700)
     # plot_images(
@@ -139,7 +152,7 @@ def analyze_connection(path, debug=False):
     # result = model.inference(dataset, verbose=False)
     image_set = []
     global_line = []
-    local_connection_group = {}
+    local_lines = {}
     # debug_image = []
 
     for i in range(len(dataset)):
@@ -147,13 +160,10 @@ def analyze_connection(path, debug=False):
         if image_bk.shape != (slice_size, slice_size, 3):
             continue
         image = image_bk.copy()
-        # plot_images(image, 600)
         mask = dataset[i][0][:, :, 3:]
-        h, w = image.shape[:2]
         image_without_mask = image[:, :, :3][np.repeat((mask > 240), 3, axis=-1)]
         row_idx = i // (num_column * interval)
         col_idx = i % (num_column * interval)
-        grid_anchor = (col_idx, num_row - row_idx - interval)
         anchor = (
             col_idx * slice_size / interval,
             (num_row * interval - row_idx - interval) * slice_size / interval,
@@ -167,68 +177,119 @@ def analyze_connection(path, debug=False):
             else:
                 lines = predict_mask_img(dataset[i][0])
                 mode = 2
-            # if [row_idx, col_idx] == [1, 7]:
-            #     # plot_images(image, 300)
-            #     print(lines)
-            #     print(mode)
-            #     print("line only")
-            #     l = predict_line_only_img(dataset[i][0])
-            #     plot_images(draw_line(dataset[i][0].copy(), l, thickness=1), 300)
-            #     print("mask")
-            #     l = predict_mask_img(dataset[i][0])
-            #     plot_images(draw_line(dataset[i][0].copy(), l, thickness=1), 300)
-
-            #     print(mask.mean())
-            #     print(slice_image.mean())
-            #     plot_images(draw_line(dataset[i][0].copy(), lines, thickness=1), 300)
-            #     exit()
-            connection = build_connection(
-                lines,
-                norm1,
-                similar_threshold=0.01,
-                threshold=0.01,
-                duplicate_threshold=0.01,
-            )
-
-            if len(connection) > 0:
-                local_connection_group[(row_idx, col_idx)] = (
-                    [np.array(c) for c in connection],
-                    grid_anchor,
-                )
-
-            for j, group in enumerate(connection):
-                color = color_map(j + 1)
-                image = draw_rect(image, group, color=color, width=8)
-            if len(lines) > 0:
-                image = draw_line(image, lines, thickness=1)
+            filtered = []
             for line in lines:
-                line[0][0] = anchor[0] + line[0][0] * slice_size
-                line[0][1] = anchor[1] + line[0][1] * slice_size
-                line[1][0] = anchor[0] + line[1][0] * slice_size
-                line[1][1] = anchor[1] + line[1][1] * slice_size
-                line[:, 0] /= ori_img.shape[1]
-                line[:, 1] /= ori_img.shape[0]
-                global_line.append(line.tolist())
+                for point in line:
+                    start = int(point[0] * slice_size)
+                    end = int((1 - point[1]) * slice_size)
+                    radius = 3
+                    radius_pixel = image_bk[
+                        end - radius : end + radius, start - radius : start + radius
+                    ]
+                    if radius_pixel.size > 0 and radius_pixel.mean() == 255:
+                        filtered.append(False)
+                        break
+                else:
+                    filtered.append(True)
+            lines = lines[filtered]
 
-        # image = np.concatenate((image, mask), axis=-1)
+            if len(lines) > 0:
+                local_lines[(row_idx, col_idx)] = (lines, anchor)
+            if [row_idx, col_idx] in [
+                debug_cell,
+                [debug_cell[0] + 1, debug_cell[1]],
+                [debug_cell[0], debug_cell[1] + 1],
+            ]:
+                print(mode)
+                print("mask mean value:", mask.mean())
+                print("lines")
+                print(lines)
+                # print("anchor")
+                # print(lines * slice_size + anchor)
+                # print("line only")
+                # l = predict_line_only_img(dataset[i][0])
+                # plot_images(draw_line(dataset[i][0].copy(), l, thickness=1), 300)
+                # print("mask")
+                # l = predict_mask_img(dataset[i][0])
+                # plot_images(draw_line(dataset[i][0].copy(), l, thickness=1), 300)
+                plot_images(draw_line(dataset[i][0].copy(), lines, thickness=1), 300)
+
+            image = draw_line(image, lines, thickness=2)
+
+        image = np.concatenate((image, mask), axis=-1)
         # if row_idx == 6 and 0 <= col_idx <= 5:
         #     debug_image.append(image)
         if row_idx % interval == 0 and col_idx % interval == 0:
             image_set.append(image)
+
+    # remove silimar lines
+    threhold = 3
+    for i, j in itertools.product(range(num_row), range(num_column)):
+        if (i, j) not in local_lines:
+            continue
+        group, group_anchor = local_lines[(i, j)]
+        filtered = []
+        if (i, j + 1) in local_lines:
+            group_right, group_right_anchor = local_lines[(i, j + 1)]
+            for line in group:
+                line_g = line * slice_size + group_anchor
+                for rline in group_right:
+                    rline_g = rline * slice_size + group_right_anchor
+                    if (
+                        norm1(line_g[0], rline_g[0]) < threhold
+                        and norm1(line_g[1], rline_g[1]) < threhold
+                    ) or (
+                        norm1(line_g[0], rline_g[1]) < threhold
+                        and norm1(line_g[1], rline_g[0]) < threhold
+                    ):
+                        filtered.append(False)
+                        # print(line, rline_g)
+                        # print(i,j)
+                        # exit()
+                        break
+                else:
+                    filtered.append(True)
+            group = group[filtered]
+        filtered = []
+        if (i + 1, j) in local_lines:
+            group_bottom, group_bottom_anchor = local_lines[(i + 1, j)]
+            for line in group:
+                line_g = line + group_anchor
+                for rline in group_bottom:
+                    rline_g = rline * slice_size + group_bottom_anchor
+                    if (
+                        norm1(line_g[0], rline_g[0]) < threhold
+                        and norm1(line_g[1], rline_g[1]) < threhold
+                    ) or (
+                        norm1(line_g[0], rline_g[1]) < threhold
+                        and norm1(line_g[1], rline_g[0]) < threhold
+                    ):
+                        filtered.append(False)
+                        # print(line, rline_g)
+                        # print(i, j)
+                        # exit()
+                        break
+                else:
+                    filtered.append(True)
+            group = group[filtered]
+        local_lines[(i, j)] = (group, local_lines[(i, j)][1])
+
+    # combine lines between slices
     threshold = 0.1
     for i, j in itertools.product(range(num_row), range(num_column)):
-        if (i, j) not in local_connection_group:
+        if (i, j) not in local_lines:
             continue
-        on_border_set = local_connection_group[(i, j)][0]
-        grid = local_connection_group.get((i, j + 1), None)
-        if grid:
-            for neighbor_border_set in grid[0]:
-                matches_left = []
-                for a in neighbor_border_set:
+        on_border_set = local_lines[(i, j)][0]
+        if (i, j + 1) in local_lines:
+            matches_left = []
+            # grid right
+            for line in local_lines[(i, j + 1)][0]:
+                for a in line:
                     if a[0] <= threshold:
                         matches_left.append(a)
-                for agroup in on_border_set:
-                    for a in agroup:
+            for line in on_border_set:
+                if abs(line[0, 1] - line[1, 1]) < abs(line[0, 0] - line[1, 0]):
+                    for a in line:
                         if a[0] >= 1 - threshold:
                             if len(matches_left) > 0:
                                 matched_distances = distance.cdist([a], matches_left)
@@ -236,80 +297,113 @@ def analyze_connection(path, debug=False):
                                 a[1] = m[1]
                                 m[0] = 0
 
-        grid = local_connection_group.get((i + 1, j), None)
-        if grid:
-            for neighbor_border_set in grid[0]:
-                matches_bottom = []
-                for a in neighbor_border_set:
+        if (i + 1, j) in local_lines:
+            matches_bottom = []
+            # grid bottom
+            for line in local_lines[(i + 1, j)][0]:
+                for a in line:
                     if a[1] >= 1 - threshold:
                         matches_bottom.append(a)
-                for agroup in on_border_set:
-                    for a in agroup:
+            for line in on_border_set:
+                if abs(line[0, 1] - line[1, 1]) > abs(line[0, 0] - line[1, 0]):
+                    for a in line:
                         if a[1] <= threshold:
                             if len(matches_bottom) > 0:
                                 matched_distances = distance.cdist([a], matches_bottom)
                                 m = matches_bottom[np.argmin(matched_distances)]
                                 a[0] = m[0]
                                 m[1] = 1
-        # if i == 2 and j == 3:
-        #     print(on_border_set)
-        #     print(grid[0])
+        if [i, j] == debug_cell:
+            print("group")
+            print(on_border_set)
+            print("matches left")
+            print(matches_left)
+            print("matches bottom")
+            print(matches_bottom)
+    local_connection_group = {}
+    for pos, (lines, anchor) in list(local_lines.items()):
+        connection = build_connection(
+            lines,
+            norm1,
+            similar_threshold=0,
+            threshold=0.05,
+            duplicate_threshold=0.05,
+        )
+        local_connection_group[pos] = (connection, anchor)
+        # if pos == (3, 7):
+        #     print(lines)
+        #     print(connection)
         #     exit()
-        # print(i, j)
-        # print(on_border_set)
-        # print(neighbor_border_set)
+    # convert to global coordinate
+    global_line = []
+    for pos, (lines, anchor) in list(local_lines.items()):
+        for line in lines:
+            line[0][0] = anchor[0] + line[0][0] * slice_size
+            line[0][1] = anchor[1] + line[0][1] * slice_size
+            line[1][0] = anchor[0] + line[1][0] * slice_size
+            line[1][1] = anchor[1] + line[1][1] * slice_size
+            line[:, 0] /= ori_img.shape[1]
+            line[:, 1] /= ori_img.shape[0]
+            global_line.append(line.tolist())
     global_connection = []
     for pos, (groups, anchor) in list(local_connection_group.items()):
+        for i in range(len(groups)):
+            groups[i] = np.array(groups[i])
         for group in groups:
-            group[:, 0] = group[:, 0] + anchor[0]
-            group[:, 1] = group[:, 1] + anchor[1]
-            # print(group)
-            group[:, 0] /= num_column
-            group[:, 1] /= num_row
+            group[:, 0] = group[:, 0] * slice_size + anchor[0]
+            group[:, 1] = group[:, 1] * slice_size + anchor[1]
+            group[:, 0] /= ori_img.shape[1]
+            group[:, 1] /= ori_img.shape[0]
             global_connection.append(group.tolist())
+        # if pos == (2, 1) or pos == (2, 2):
+        #     print(groups)
 
-    # plot_images(ori_img, 600)
-    # group_connection = global_connection
     group_connection = build_connection(
-        global_connection, norm1, similar_threshold=0, threshold=1e-5, duplicate_threshold=1e-5
+        global_connection, norm1, similar_threshold=0, threshold=1e-5, duplicate_threshold=0
     )
-
+    # print(group_connection)
     # for i, group in enumerate(group_connection):
     #     color = color_map(i)
     #     ori_img = draw_rect(ori_img, group, color=color, width=5)
     plot_images(ori_img, 800)
-
+    # exit()
     if debug:
-        # print(local_connection_group)
         # line graph
-        # img = np.full(ori_img.shape, 255, np.uint8)
-        # img = draw_line(img, global_line, endpoint=True, endpoint_thickness=3)
-        # plot_images(img, 800)
-        # plot_images(debug_image, 200)
-
+        img = np.full(ori_img.shape, 255, np.uint8)
+        img = draw_line(img, global_line, endpoint=True, endpoint_thickness=1)
+        plot_images(img, 800)
+        print("global connection map")
+        # img_bk = img.copy()
         # for i, group in enumerate(global_connection):
-        #     color = color_map(i)
-        #     img = draw_rect(img, group, color=color, width=10)
-        # plot_images(img, 600)
+        #     color = color_map(i % 3)
+        #     img_bk = draw_rect(img_bk, group, color=color, width=6)
+        # plot_images(img_bk, 800)
+        print("group connection map")
+        for i, group in enumerate(group_connection):
+            color = color_map(i)
+            img = draw_rect(img, group, color=color, width=6)
+        plot_images(img, 800)
         # exit()
         img = np.full(ori_img.shape, 255, np.uint8)
         img = draw_line(img, global_line, endpoint=True, endpoint_thickness=4, color=(0, 0, 0))
 
-        process_images = []
         fimg = create_grid(
             image_set,
             nrow=num_column,
-            padding=5,
+            padding=1,
             pad_value=127,
         )
+
         plot_images(fimg, 800)
-        for i, group in enumerate(group_connection):
-            img_part = img.copy()
-            img_part = draw_rect(img_part, group, color=(192, 91, 22), width=5)
-            process_images.append(img_part)
-        plot_images(process_images[3:6], img_width=800)
+        process_images = []
+        # for i, group in enumerate(group_connection):
+        #     img_part = img.copy()
+        #     img_part = draw_rect(img_part, group, color=(192, 91, 22), width=5)
+        #     process_images.append(img_part)
+        # plot_images(process_images[0:3], img_width=800)
         exit()
     for i, group in enumerate(group_connection):
+        print(group)
         color = color_map(i)
         ori_img = draw_rect(ori_img, group, color=color, width=5)
     return group_connection, ori_img
@@ -327,7 +421,9 @@ if __name__ == "__main__":
     # img_names = ("24023 24167 24348").split()[-2:]
     # img_names = ("24023").split()
     path = "dataset_fullimg_mask/images/circuit16176.png"
-    path = "dataset_fullimg_mask/images/circuit" + img_name[0] + ".png"
     path = "dataset_fullimg_mask/images/circuit10188.png"
-    group_connection, img = analyze_connection(cv2.imread(path, cv2.IMREAD_UNCHANGED), debug=True)
+    path = "dataset_fullimg_mask/images/circuit" + img_name[0] + ".png"
+    group_connection, img = analyze_connection(
+        cv2.imread(path, cv2.IMREAD_UNCHANGED), debug=True, debug_cell=[2, 7]
+    )
     # plot_images(img, 800)

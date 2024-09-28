@@ -8,6 +8,7 @@ import inspect
 import io
 import itertools
 import json
+import seaborn as sns
 import logging
 import math
 import os
@@ -76,7 +77,6 @@ from torchvision.utils import make_grid
 from tqdm import tqdm
 
 import wandb
-from utility import *
 
 
 class StopExecution(Exception):
@@ -184,13 +184,21 @@ def print(*args, **kwargs):
         print_tmp(*args, **kwargs)
 
 
-def color_map(n, cmap="Accent_r"):
-    import matplotlib as mpl
+def color_map(n):
+    from pypalettes import get_hex, get_rgb, load_cmap
 
-    colors = mpl.colormaps[cmap].colors
-    color = colors[n % len(colors)]
-    color = tuple(map(lambda x: int(x * 255), color))
-    return color
+    return get_rgb(["Signac", "Antique"])[n]
+
+
+# for x in mpl.colormaps:
+#     print(x)
+#     try:
+#         print(len(mpl.colormaps[x].colors))
+#     except:
+#         pass
+# color_map(0)
+# print(mpl.colormaps)
+# exit()
 
 
 def shapely_to_numpy(shapely_obj):
@@ -281,7 +289,7 @@ def flatten_list(lst):
 
 def plot_images(images, img_width=None, max_images=5, parallel=False, parallel_size=5):
     if not isinstance(images, abc.Sequence) and (
-        isinstance(images, np.ndarray) and len(images.shape) == 3
+        isinstance(images, np.ndarray) and len(images.shape) == 3 or len(images.shape) == 2
     ):
         images = [images]
     if not is_notebook():
@@ -466,6 +474,8 @@ def draw_lines(img, lines):
 def draw_line(
     img, box, color=(0, 0, 255), thickness=2, endpoint=False, endpoint_thickness=2, scale=True
 ):
+    if len(box) == 0:
+        return img
     alpha = None
     if img.shape[2] == 4:
         alpha = img[:, :, 3:]
@@ -534,6 +544,14 @@ def Hungarian_Order(g1b, g2b, criterion):
                 T[i][j] = criterion(ix, jx)
         row_ind, col_ind = linear_sum_assignment(T)
         g2b[idx] = g2b[idx][row_ind][col_ind]
+
+
+def take(sequence, axis):
+    if axis == 0:
+        yield from sequence
+    else:
+        for item in sequence:
+            yield from take(item, axis - 1) if axis >= 0 else item
 
 
 # def stratified_sampling(dataset: Dataset, train_samples_per_class: int):
