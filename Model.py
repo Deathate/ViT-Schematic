@@ -108,7 +108,8 @@ class Datasetbehaviour:
                     num_cpus=os.cpu_count() - 4,
                 )
             self.__dataset = np.array([x for x in dataset if x is not None], dtype=object)
-            pickle.dump(self.__dataset, open(self.filepath, "wb"))
+            if not self.always_reset:
+                pickle.dump(self.__dataset, open(self.filepath, "wb"))
         self.print("--- [Loading done] ---\n")
         Datasetbehaviour.reset()
 

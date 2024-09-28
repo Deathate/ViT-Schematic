@@ -1,3 +1,4 @@
+import builtins
 import collections.abc as abc
 import copy
 import datetime
@@ -8,7 +9,6 @@ import inspect
 import io
 import itertools
 import json
-import seaborn as sns
 import logging
 import math
 import os
@@ -25,13 +25,13 @@ import time
 import timeit
 import traceback
 import typing
+import warnings
 from collections import OrderedDict, defaultdict, namedtuple
 from dataclasses import dataclass
 from functools import cached_property, partial
 from inspect import signature
 from itertools import chain, count
 from pathlib import Path
-from pprint import pprint
 from typing import Annotated
 
 import cv2
@@ -39,13 +39,14 @@ import einops
 import ipyplot
 import IPython
 import IPython.display
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import p_tqdm
 import plotly.express as px
 import plotly.graph_objects as go
-import seaborn
+import seaborn as sns
 import shapely
 import torch
 import torch.nn as nn
@@ -79,6 +80,44 @@ from tqdm import tqdm
 import wandb
 
 
+# write a context manager to prevent showing matplotlib plots
+class HiddenMatPlots:
+    def __init__(self, disable=False):
+        self.disable = disable
+
+    def __enter__(self):
+        if not self.disable:
+            self._original_backend = mpl.get_backend()
+            mpl.use("Agg")
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if not self.disable:
+            mpl.use(self._original_backend)
+
+
+class HiddenPlots:
+    def __init__(self, disable=False):
+        self.disable = disable
+
+    def __enter__(self):
+        if not self.disable:
+            self.__disable = plot_images.disable
+            plot_images.disable = True
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if not self.disable:
+            plot_images.disable = self.__disable
+
+
+def hidden_matplotlib_plots(func):
+    def wrapper(*args, **kwargs):
+        with HiddenMatPlots():
+            result = func(*args, **kwargs)
+        return result
+
+    return wrapper
+
+
 class StopExecution(Exception):
     def _render_traceback_(self):
         return []
@@ -94,6 +133,9 @@ class HiddenPrints:
 
     def __enter__(self):
         if not self.disable:
+            global DEBUG
+            self._debug = DEBUG
+            DEBUG = False
             self._original_stdout = sys.stdout
             sys.stdout = open(os.devnull, "w")
 
@@ -101,6 +143,8 @@ class HiddenPrints:
         if not self.disable:
             sys.stdout.close()
             sys.stdout = self._original_stdout
+            global DEBUG
+            DEBUG = self._debug
 
 
 class Timer:
@@ -171,7 +215,7 @@ def is_notebook() -> bool:
         return False  # Probably standard Python interpreter
 
 
-def print(*args, **kwargs):
+def my_print(*args, **kwargs):
     if not DEBUG:
         return
     info = traceback.format_stack()[-2]
@@ -184,10 +228,14 @@ def print(*args, **kwargs):
         print_tmp(*args, **kwargs)
 
 
+builtins.print = my_print
+
+
 def color_map(n):
     from pypalettes import get_hex, get_rgb, load_cmap
 
-    return get_rgb(["Signac", "Antique"])[n]
+    colors = get_rgb(["Signac", "Antique"])
+    return colors[n % len(colors)]
 
 
 # for x in mpl.colormaps:
@@ -213,8 +261,15 @@ def plotly_to_array(fig):
     return np.asarray(Image.open(io.BytesIO(image_bytes)))
 
 
-def seaborn_to_array(fig):
-    return np.asarray(fig.get_figure().canvas.buffer_rgba())
+def seaborn_to_array(ax, dpi=200):
+    buf = io.BytesIO()
+    ax.figure.savefig(buf, format="png", dpi=dpi)
+    buf.seek(0)
+    img_arr = np.frombuffer(buf.getvalue(), dtype=np.uint8)
+    buf.close()
+    img = cv2.imdecode(img_arr, 1)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    return img
 
 
 def visualize_attentions(maps, has_attention=False):
@@ -287,7 +342,13 @@ def flatten_list(lst):
     return flattened_list
 
 
+@static_vars(disable=False)
 def plot_images(images, img_width=None, max_images=5, parallel=False, parallel_size=5):
+    if plot_images.disable:
+        return
+    if isinstance(images, mpl.axes.Axes):
+        plot_images(seaborn_to_array(images), img_width=img_width, max_images=max_images)
+        return
     if not isinstance(images, abc.Sequence) and (
         isinstance(images, np.ndarray) and len(images.shape) == 3 or len(images.shape) == 2
     ):
@@ -318,7 +379,9 @@ def plot_images(images, img_width=None, max_images=5, parallel=False, parallel_s
     cols = len(images) // L
     if len(images) == 1:
         images = images[0]
-        height = images.shape[0] if img_width == -1 else img_width if img_width else 200
+        height = max(images.shape) if img_width == -1 else img_width if img_width else 200
+        if images.max() <= 1:
+            images = (images * 255).astype(np.uint8)
         display(ImageOps.contain(Image.fromarray(images), (height, height)))
     else:
         if not parallel:
@@ -382,6 +445,48 @@ def padding(img, size):
         constant_values=255,
     )
     return img_pad
+
+
+def specify_padding(img, w, h, fill):
+    img_pad = np.pad(
+        img,
+        (
+            (
+                (h, 0),
+                (0, w),
+                (0, 0),
+            )
+            if len(img.shape) == 3
+            else ((h, 0), (0, w))
+        ),
+        mode="constant",
+        constant_values=fill,
+    )
+    return img_pad
+
+
+def shift(img, pos, fill):
+    new_img = np.full_like(img, fill)
+    x, y = pos
+    if len(img.shape) == 2:
+        h, w = img.shape
+    else:
+        h, w, c = img.shape
+    if x < 0:
+        new_img[:, : w + x] = img[:, -x:]
+        return shift(new_img, (0, y), fill)
+    if y < 0:
+        new_img[-y:] = img[:y]
+        return shift(new_img, (x, 0), fill)
+    if x == 0 and y == 0:
+        return img
+    elif x == 0:
+        new_img[: h - y] = img[y:]
+    elif y == 0:
+        new_img[:, x:] = img[:, :-x]
+    else:
+        new_img[:-y, x:] = img[y:, :-x]
+    return new_img
 
 
 def draw_bounding_boxes(img, box, width=2):
