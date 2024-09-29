@@ -356,6 +356,8 @@ def plot_images(images, img_width=None, max_images=5, parallel=False, parallel_s
     if not is_notebook():
         for image in images:
             with tempfile.NamedTemporaryFile(suffix=".png") as f:
+                if image.max() <= 1:
+                    image = (image * 255).astype(np.uint8)
                 cv2.imwrite(f.name, image)
                 # os.system(
                 #     f"convert {f.name} -resize {img_width if img_width else 200} -alpha off sixel:-"

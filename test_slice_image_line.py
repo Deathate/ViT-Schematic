@@ -34,42 +34,6 @@ class OneTimeWrapper(Datasetbehaviour):
         return self.dataset, 0
 
 
-def legalize_line(lines):
-    for j, line in enumerate(lines):
-        r = 0.03
-        if line[0, 0] < r:
-            line[0, 0] = 0
-        if line[0, 1] < r:
-            line[0, 1] = 0
-        if line[1, 0] < r:
-            line[1, 0] = 0
-        if line[1, 1] < r:
-            line[1, 1] = 0
-        if line[0, 0] > 1 - r:
-            line[0, 0] = 1
-        if line[0, 1] > 1 - r:
-            line[0, 1] = 1
-        if line[1, 0] > 1 - r:
-            line[1, 0] = 1
-        if line[1, 1] > 1 - r:
-            line[1, 1] = 1
-        if abs(line[0, 0] - line[1, 0]) < abs(line[0, 1] - line[1, 1]):
-            m = (line[0, 0] + line[1, 0]) / 2
-            line[0, 0] = m
-            line[1, 0] = m
-        else:
-            m = (line[0, 1] + line[1, 1]) / 2
-            line[0, 1] = m
-            line[1, 1] = m
-        lines[j] = line
-    new_lines = []
-    for line in lines:
-        if np.linalg.norm(line[0] - line[1]) > 0.01:
-            new_lines.append(line)
-    new_lines = np.array(new_lines)
-    return new_lines
-
-
 current_dir = Path(__file__).parent
 model = Model(
     xtransform=xtransform,
@@ -78,7 +42,7 @@ model = Model(
 try:
     model.fit(
         create_model(),
-        pretrained_path=current_dir / "runs/FormalDatasetWindowedLinePair/0925_11-14-32/best.pth",
+        pretrained_path=current_dir / "aruns/FormalDatasetWindowedLinePair/0925_11-14-32/best.pth",
     )
 except:
     model.fit(
@@ -101,37 +65,74 @@ except:
     )
 
 
-def predict_mask_img(img):
+def predict_mask_img(img, threshold):
     img = img.copy()
     tmp = OneTimeWrapper(img)
     result = model.inference(tmp, verbose=False)
-    result = legalize_line(result[0].cpu().numpy())
+    result = legalize_line(result[0].cpu().numpy(), threshold)
     return result
 
 
-def predict_line_only_img(img):
+def predict_line_only_img(img, threshold):
     img = img.copy()
     img[:, :, 3] = 255
     tmp = OneTimeWrapper(img)
     result = model_l.inference(tmp, verbose=False)
-    result = legalize_line(result[0].cpu().numpy())
+    result = legalize_line(result[0].cpu().numpy(), threshold)
     return result
 
 
 # %%
+def legalize_line(lines, threshold):
+    for j, line in enumerate(lines):
+        # r = 0.03
+        # if line[0, 0] < r:
+        #     line[0, 0] = 0
+        # if line[0, 1] < r:
+        #     line[0, 1] = 0
+        # if line[1, 0] < r:
+        #     line[1, 0] = 0
+        # if line[1, 1] < r:
+        #     line[1, 1] = 0
+        # if line[0, 0] > 1 - r:
+        #     line[0, 0] = 1
+        # if line[0, 1] > 1 - r:
+        #     line[0, 1] = 1
+        # if line[1, 0] > 1 - r:
+        #     line[1, 0] = 1
+        # if line[1, 1] > 1 - r:
+        #     line[1, 1] = 1
+        if abs(line[0, 0] - line[1, 0]) < abs(line[0, 1] - line[1, 1]):
+            m = (line[0, 0] + line[1, 0]) / 2
+            line[0, 0] = m
+            line[1, 0] = m
+        else:
+            m = (line[0, 1] + line[1, 1]) / 2
+            line[0, 1] = m
+            line[1, 1] = m
+        lines[j] = line
+    new_lines = []
+    for line in lines:
+        if np.linalg.norm(line[0] - line[1]) > threshold:
+            new_lines.append(line)
+    new_lines = np.array(new_lines)
+    return new_lines
+
+
 @torch.no_grad()
 @hidden_matplotlib_plots
 def analyze_connection(
     path,
+    min_line_length,
     local_threshold,
-    global_threshold=1e-5,
-    remove_duplicate=True,
-    optimal_shift=False,
-    strict_match=False,
-    soft_match=False,
-    debug=False,
-    debug_shift_optimization=False,
-    debug_cell=[0, 0],
+    global_threshold,
+    remove_duplicate,
+    optimal_shift,
+    strict_match,
+    soft_match,
+    debug,
+    debug_shift_optimization,
+    debug_cell,
 ):
     if not debug and debug_shift_optimization:
         warnings.warn("debug_shift_optimization is disabled because debug is disabled")
@@ -152,8 +153,6 @@ def analyze_connection(
                 slice_size, ori_img, debug_shift_optimization
             )
             ori_img = shift(ori_img, (shift_x, shift_y), fill=255)
-            print("shift_x:", shift_x)
-            print("shift_y:", shift_y)
         num_column = math.ceil(ori_img.shape[1] / slice_size)
         num_row = math.ceil(ori_img.shape[0] / slice_size)
         dataset = TestWindowed(ori_img, interval, slice_size)
@@ -177,6 +176,7 @@ def analyze_connection(
 
         for i in range(len(dataset)):
             image_bk = dataset[i][0][:, :, :3]
+            image_bk_gray = cv2.cvtColor(image_bk, cv2.COLOR_BGR2GRAY)
             if image_bk.shape != (slice_size, slice_size, 3):
                 continue
             image = image_bk.copy()
@@ -192,10 +192,10 @@ def analyze_connection(
                 mode = -1
                 lines = []
                 if mask.mean() >= 254:
-                    lines = predict_line_only_img(dataset[i][0])
+                    lines = predict_line_only_img(dataset[i][0], min_line_length)
                     mode = 1
                 else:
-                    lines = predict_mask_img(dataset[i][0])
+                    lines = predict_mask_img(dataset[i][0], min_line_length)
                     mode = 2
                 filtered = []
                 for line in lines:
@@ -203,16 +203,22 @@ def analyze_connection(
                         start = int(point[0] * slice_size)
                         end = int((1 - point[1]) * slice_size)
                         radius = 3
-                        radius_pixel = image_bk[
-                            end - radius : end + radius, start - radius : start + radius
+                        radius_pixel = image_bk_gray[
+                            max(end - radius, 0) : min(end + radius, slice_size - 1),
+                            max(start - radius, 0) : min(start + radius, slice_size - 1),
                         ]
+                        # if (row_idx, col_idx) == (4, 1):
+                        #     print(line, radius_pixel, start, end)
                         if radius_pixel.size > 0 and radius_pixel.mean() == 255:
                             filtered.append(False)
                             break
                     else:
                         filtered.append(True)
+                # if (row_idx, col_idx) == (4, 1):
+                #     print(lines)
+                #     exit()
                 lines = lines[filtered]
-
+                # if row_idx == 0 and col_idx == 0:
                 if len(lines) > 0:
                     local_lines[(row_idx, col_idx)] = (lines, anchor)
                 if [row_idx, col_idx] in [
@@ -237,8 +243,6 @@ def analyze_connection(
                 image = draw_line(image, lines, thickness=2)
 
             image = np.concatenate((image, mask), axis=-1)
-            # if row_idx == 6 and 0 <= col_idx <= 5:
-            #     debug_image.append(image)
             if row_idx % interval == 0 and col_idx % interval == 0:
                 image_set.append(image)
 
@@ -354,13 +358,19 @@ def analyze_connection(
                             if a[1] <= threshold:
                                 if len(matches_bottom) > 0:
                                     shift_match = np.array(matches_bottom)
-                                    shift_match[:, 1] += 1
+                                    shift_match[:, 1] = 1 - shift_match[:, 1]
                                     matched_distances = distance.cdist([a], shift_match)
                                     m = matches_bottom[np.argmin(matched_distances)]
                                     if abs(line[0, 1] - line[1, 1]) > abs(line[0, 0] - line[1, 0]):
                                         a[0] = m[0]
                                         a[1] = 0
                                         m[1] = 1
+                                        # if [i, j] == [2, 6]:
+                                        #     print(on_border_set)
+                                        #     print(matches_bottom)
+                                        #     print(shift_match)
+                                        #     print(matches_bottom)
+                                        #     exit()
                                     else:
                                         if soft_match:
                                             shift_m = m.copy()
@@ -373,10 +383,6 @@ def analyze_connection(
                                                     a[1] = 0
                                                     m[1] = 1
 
-                    # if [i, j] == [2, 4]:
-                    #     print(on_border_set)
-                    #     print(matches_bottom)
-                    #     exit()
                 if [i, j] == debug_cell:
                     print("group")
                     print(on_border_set)
@@ -421,13 +427,12 @@ def analyze_connection(
                 global_connection.append(group.tolist())
             # if pos == (2, 1) or pos == (2, 2):
             #     print(groups)
-
         group_connection = build_connection(
             global_connection,
             norm1,
             similar_threshold=0,
             threshold=global_threshold,
-            duplicate_threshold=global_threshold if remove_duplicate else 0,
+            duplicate_threshold=global_threshold if remove_duplicate else -0.1,
         )
         # print(group_connection)
         # for i, group in enumerate(group_connection):
@@ -461,7 +466,7 @@ def analyze_connection(
         )
 
         plot_images(fimg, 800)
-        process_images = []
+        # process_images = []
         # for i, group in enumerate(group_connection):
         #     img_part = img.copy()
         #     img_part = draw_rect(img_part, group, color=(192, 91, 22), width=5)
@@ -489,10 +494,10 @@ def calculate_optimal_shift(slice_size, ori_img, debug):
         gray_scale[mask] = 1
         gray_scale = 1 - gray_scale
         plot_images(gray_scale, 600)
-        weight_metric = np.concatenate((np.linspace(0, 1, 25), np.linspace(1, 0, 25)))
-        weight_metric = weight_metric**3
-        weight_metric[:10] = -1
-        weight_metric[-10:] = -1
+        # weight_metric = np.concatenate((np.linspace(0, 1, 25), np.linspace(1, 0, 25)))
+        weight_metric = np.ones(slice_size)
+        weight_metric[:5] = -1
+        weight_metric[-5:] = -1
         if debug:
             ax = sns.barplot(weight_metric)
             ax.set(title="weight metric", xticks=list(range(0, len(weight_metric), 10)))
@@ -599,19 +604,21 @@ if __name__ == "__main__":
     img_name = [img_names[-7]]
     # img_names = ("24023 24167 24348").split()[-2:]
     # img_names = ("24023").split()
-    path = "dataset_fullimg_mask/images/circuit" + img_name[0] + ".png"
-    path = "dataset_fullimg_mask/images/circuit10188.png"
     path = "dataset_fullimg_mask/images/circuit24348.png"
     path = "dataset_fullimg_mask/images/circuit16176.png"
+    path = "dataset_fullimg_mask/images/circuit" + img_name[0] + ".png"
+    path = "dataset_fullimg_mask/images/circuit10188.png"
+    path = "test_images/circuit50038.png"
     group_connection, img = analyze_connection(
         cv2.imread(path, cv2.IMREAD_UNCHANGED),
-        local_threshold=0.1,
-        global_threshold=0.01,
+        min_line_length=0.005,
+        local_threshold=0.09,
+        global_threshold=1e-5,
         remove_duplicate=False,
-        optimal_shift=False,
-        strict_match=False,
-        soft_match=True,
-        debug=False,
+        optimal_shift=True,
+        strict_match=True,
+        soft_match=False,
+        debug=True,
         debug_shift_optimization=True,
         debug_cell=[-1, -1],
     )
