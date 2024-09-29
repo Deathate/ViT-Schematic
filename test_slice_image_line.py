@@ -486,7 +486,7 @@ def calculate_optimal_shift(slice_size, ori_img, boundary, debug):
         gray_scale = 1 - gray_scale
         plot_images(gray_scale, 600)
         # weight_metric = np.concatenate((np.linspace(0, 1, 25), np.linspace(1, 0, 25)))
-        weight_metric = np.ones(slice_size)
+        weight_metric = np.zeros(slice_size)
         weight_metric[:boundary] = -1
         weight_metric[-boundary:] = -1
         if debug:
@@ -494,24 +494,36 @@ def calculate_optimal_shift(slice_size, ori_img, boundary, debug):
             ax.set(title="weight metric", xticks=list(range(0, len(weight_metric), 10)))
             plot_images(ax, 600)
             ax.figure.clf()
-        max_score = 0
+        max_score = -math.inf
+        start_score = 0
         max_i = 0
+        record = {}
         for i in range(slice_size):
             gray_scale = shift(gray_scale, (0, 1), 0)
             sum_of_row = np.sum(gray_scale, axis=1)
-            score = np.repeat(weight_metric, gray_scale.shape[0] // slice_size) * sum_of_row
+            score = np.tile(weight_metric, gray_scale.shape[0] // slice_size) * sum_of_row
+            record[i] = score.reshape(slice_size, -1).sum(axis=0)
             score = np.sum(score)
             if score > max_score:
                 max_score = score
                 max_i = i
-
+            if i == 0:
+                start_score = score
         optimal_shift_y = max_i
-        max_score = 0
+        # print("start_score of y:", start_score)
+        # plot_images(ax := sns.barplot(record[0]), 600)
+        # ax.figure.clf()
+        # print("max_score of y:", max_score)
+        # plot_images(ax := sns.barplot(record[max_i]), 600)
+        # ax.figure.clf()
+        # print(max_i)
+
+        max_score = -math.inf
         max_i = 0
         for i in range(slice_size):
             gray_scale = shift(gray_scale, (1, 0), 0)
             sum_of_row = np.sum(gray_scale, axis=0)
-            score = np.repeat(weight_metric, gray_scale.shape[1] // slice_size) * sum_of_row
+            score = np.tile(weight_metric, gray_scale.shape[1] // slice_size) * sum_of_row
             score = np.sum(score)
             if score > max_score:
                 max_score = score
@@ -572,26 +584,28 @@ if __name__ == "__main__":
     img_names = (
         "218 82 850 1807 260 50001 50038 50119 50207 50799 42852 33748 8203 7735 7578 6826 6640 5841"
     ).split()
-    img_name = [img_names[-6]]
     # img_names = ("24023 24167 24348").split()[-2:]
     # img_names = ("24023").split()
-    path = "test_images/circuit50038.png"
     path = "dataset_fullimg_mask/images/circuit10188.png"
     path = "dataset_fullimg_mask/images/circuit16176.png"
-    path = "dataset_fullimg_mask/images/circuit" + img_name[0] + ".png"
+    path = "dataset_fullimg_mask/images/circuit" + img_names[0] + ".png"
     path = "dataset_fullimg_mask/images/circuit24348.png"
+    path = "test_images/circuit50038.png"
+    path = "dataset_fullimg_mask/images/circuit56081.png"
+    path = "dataset_fullimg_mask/images/circuit3244.png"
+    img_name = [img_names[-6]]
     group_connection, img = analyze_connection(
         cv2.imread(path, cv2.IMREAD_UNCHANGED),
         min_line_length=0.005,
         local_threshold=0.09,
-        global_threshold=1e-5,
-        remove_duplicate=False,
+        global_threshold=0.015,
+        remove_duplicate=True,
         optimal_shift=True,
-        boundary=5,
-        strict_match=True,
-        strict_match_threshold=0.03,
+        boundary=3,
+        strict_match=False,
+        strict_match_threshold=0.01,
         debug=True,
-        debug_shift_optimization=False,
+        debug_shift_optimization=True,
         debug_cell=[-1, -1],
     )
     plot_images(img, 800)
