@@ -8,6 +8,7 @@ if __name__ == "__main__":
     # global_threshold: the threshold to combine the groups
     # remove_duplicate: remove the duplicate points when combining the global groups
     # optimal_shift: shift the image to find the optimal position
+    # boundary: the boundary of the weight matrix to guide the shift
     # strict_match: the strict match to find the connection
     # strict_match_threshold: the threshold to consider the strict connection
     # debug: debug mode
@@ -19,11 +20,12 @@ if __name__ == "__main__":
         local_threshold=0.09,
         global_threshold=1e-5,
         remove_duplicate=False,
-        optimal_shift=False,
+        optimal_shift=True,
+        boundary=5,
         strict_match=True,
         strict_match_threshold=0.05,
-        debug=False,
-        debug_shift_optimization=False,
+        debug=True,
+        debug_shift_optimization=True,
         debug_cell=[-1, -1],
     )
     print(group_connection)

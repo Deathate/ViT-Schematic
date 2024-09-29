@@ -128,6 +128,7 @@ def analyze_connection(
     global_threshold,
     remove_duplicate,
     optimal_shift,
+    boundary,
     strict_match,
     strict_match_threshold,
     debug,
@@ -151,8 +152,10 @@ def analyze_connection(
         shift_x, shift_y = 0, 0
         if optimal_shift:
             shift_x, shift_y = calculate_optimal_shift(
-                slice_size, ori_img, debug_shift_optimization
+                slice_size, ori_img, boundary, debug_shift_optimization
             )
+            print("optimal_shift_x:", shift_x)
+            print("optimal_shift_y:", shift_y)
             ori_img = shift(ori_img, (shift_x, shift_y), fill=255)
         num_column = math.ceil(ori_img.shape[1] / slice_size)
         num_row = math.ceil(ori_img.shape[0] / slice_size)
@@ -474,7 +477,7 @@ def analyze_connection(
         return group_connection, input_img
 
 
-def calculate_optimal_shift(slice_size, ori_img, debug):
+def calculate_optimal_shift(slice_size, ori_img, boundary, debug):
     with HiddenPrints(disable=debug), HiddenPlots(disable=debug):
         # gray_scale = ori_img[]
         gray_scale = cv2.cvtColor(ori_img, cv2.COLOR_BGR2GRAY) / 255
@@ -484,8 +487,8 @@ def calculate_optimal_shift(slice_size, ori_img, debug):
         plot_images(gray_scale, 600)
         # weight_metric = np.concatenate((np.linspace(0, 1, 25), np.linspace(1, 0, 25)))
         weight_metric = np.ones(slice_size)
-        weight_metric[:5] = -1
-        weight_metric[-5:] = -1
+        weight_metric[:boundary] = -1
+        weight_metric[-boundary:] = -1
         if debug:
             ax = sns.barplot(weight_metric)
             ax.set(title="weight metric", xticks=list(range(0, len(weight_metric), 10)))
@@ -536,8 +539,6 @@ def calculate_optimal_shift(slice_size, ori_img, debug):
             )
             plot_images(ax, 600)
             ax.figure.clf()
-        print("optimal_shift_x:", optimal_shift_x)
-        print("optimal_shift_y:", optimal_shift_y)
         if debug:
             print("original image")
             preview_dataset = TestWindowed(ori_img, 1, slice_size)
@@ -571,14 +572,14 @@ if __name__ == "__main__":
     img_names = (
         "218 82 850 1807 260 50001 50038 50119 50207 50799 42852 33748 8203 7735 7578 6826 6640 5841"
     ).split()
-    img_name = [img_names[-7]]
+    img_name = [img_names[-6]]
     # img_names = ("24023 24167 24348").split()[-2:]
     # img_names = ("24023").split()
-    path = "dataset_fullimg_mask/images/circuit24348.png"
+    path = "test_images/circuit50038.png"
+    path = "dataset_fullimg_mask/images/circuit10188.png"
     path = "dataset_fullimg_mask/images/circuit16176.png"
     path = "dataset_fullimg_mask/images/circuit" + img_name[0] + ".png"
-    path = "dataset_fullimg_mask/images/circuit10188.png"
-    path = "test_images/circuit50038.png"
+    path = "dataset_fullimg_mask/images/circuit24348.png"
     group_connection, img = analyze_connection(
         cv2.imread(path, cv2.IMREAD_UNCHANGED),
         min_line_length=0.005,
@@ -586,6 +587,7 @@ if __name__ == "__main__":
         global_threshold=1e-5,
         remove_duplicate=False,
         optimal_shift=True,
+        boundary=5,
         strict_match=True,
         strict_match_threshold=0.03,
         debug=True,
