@@ -129,11 +129,12 @@ def analyze_connection(
     remove_duplicate,
     optimal_shift,
     strict_match,
-    soft_match,
+    strict_match_threshold,
     debug,
     debug_shift_optimization,
     debug_cell,
 ):
+    soft_match = False
     if not debug and debug_shift_optimization:
         warnings.warn("debug_shift_optimization is disabled because debug is disabled")
         debug_shift_optimization = False
@@ -157,22 +158,9 @@ def analyze_connection(
         num_row = math.ceil(ori_img.shape[0] / slice_size)
         dataset = TestWindowed(ori_img, interval, slice_size)
 
-        # plot_images(ori_img, 700)
-        # plot_images(
-        #     create_grid(
-        #         [x[0] for x in dataset],
-        #         nrow=num_column,
-        #         padding=5,
-        #         pad_value=127,
-        #     ),
-        #     img_width=700,
-        # )
-        # exit()
-        # result = model.inference(dataset, verbose=False)
         image_set = []
         global_line = []
         local_lines = {}
-        # debug_image = []
 
         for i in range(len(dataset)):
             image_bk = dataset[i][0][:, :, :3]
@@ -300,7 +288,7 @@ def analyze_connection(
 
         # combine lines between slices
         if strict_match:
-            threshold = 0.1
+            threshold = strict_match_threshold
             for i, j in itertools.product(range(num_row), range(num_column)):
                 if (i, j) not in local_lines:
                     continue
@@ -430,9 +418,9 @@ def analyze_connection(
         group_connection = build_connection(
             global_connection,
             norm1,
-            similar_threshold=0,
+            similar_threshold=-1,
             threshold=global_threshold,
-            duplicate_threshold=global_threshold if remove_duplicate else -0.1,
+            duplicate_threshold=global_threshold if remove_duplicate else -1,
         )
         # print(group_connection)
         # for i, group in enumerate(group_connection):
@@ -443,12 +431,12 @@ def analyze_connection(
         img = np.full(ori_img.shape, 255, np.uint8)
         img = draw_line(img, global_line, endpoint=True, endpoint_thickness=1)
         plot_images(img, 800)
-        # print("global connection map")
-        # img_bk = img.copy()
-        # for i, group in enumerate(global_connection):
-        #     color = color_map(i % 3)
-        #     img_bk = draw_rect(img_bk, group, color=color, width=6)
-        # plot_images(img_bk, 800)
+        print("global connection map")
+        img_bk = img.copy()
+        for i, group in enumerate(global_connection):
+            color = color_map(i % 3)
+            img_bk = draw_rect(img_bk, group, color=color, width=6)
+        plot_images(img_bk, 800)
         print("group connection map")
         for i, group in enumerate(group_connection):
             color = color_map(i)
@@ -513,25 +501,7 @@ def calculate_optimal_shift(slice_size, ori_img, debug):
             if score > max_score:
                 max_score = score
                 max_i = i
-        #     if debug and i % 5 == 0:
-        #         # preview_dataset = TestWindowed(shift(ori_img, (0, i * 10), fill=255), 1, slice_size)
-        #         # plot_images(
-        #         #     create_grid(
-        #         #         [x[0] for x in preview_dataset],
-        #         #         nrow=gray_scale.shape[1] // slice_size,
-        #         #         padding=2,
-        #         #         pad_value=127,
-        #         #     ),
-        #         #     img_width=700,
-        #         # )
-        #         # a = np.full(ori_img.shape, 255, np.uint8)
-        #         # plot_images(shift(a, (50, -50), fill=127), 600)
-        #         # exit()
-        #         print(i)
-        #         plot_images(shift(ori_img, (0, i), fill=127), 600)
-        #         # plot_images(shift(ori_img, (0, 20), fill=127), 600)
-        #         # exit()
-        # exit()
+
         optimal_shift_y = max_i
         max_score = 0
         max_i = 0
@@ -617,9 +587,9 @@ if __name__ == "__main__":
         remove_duplicate=False,
         optimal_shift=True,
         strict_match=True,
-        soft_match=False,
+        strict_match_threshold=0.03,
         debug=True,
-        debug_shift_optimization=True,
+        debug_shift_optimization=False,
         debug_cell=[-1, -1],
     )
     plot_images(img, 800)
