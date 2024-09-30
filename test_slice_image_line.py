@@ -522,8 +522,8 @@ def calculate_optimal_shift(slice_size, ori_img, boundary, debug):
         max_i = 0
         for i in range(slice_size):
             gray_scale = shift(gray_scale, (1, 0), 0)
-            sum_of_row = np.sum(gray_scale, axis=0)
-            score = np.tile(weight_metric, gray_scale.shape[1] // slice_size) * sum_of_row
+            sum_of_col = np.sum(gray_scale, axis=0)
+            score = np.tile(weight_metric, gray_scale.shape[1] // slice_size) * sum_of_col
             score = np.sum(score)
             if score > max_score:
                 max_score = score
@@ -540,7 +540,6 @@ def calculate_optimal_shift(slice_size, ori_img, boundary, debug):
             plot_images(ax, 600)
             ax.figure.clf()
 
-        sum_of_col = np.sum(gray_scale, axis=0)
         if debug:
             ax = sns.barplot(sum_of_col)
             ax.set(
