@@ -1,3 +1,4 @@
+# %%
 import builtins
 import collections.abc as abc
 import copy
@@ -26,8 +27,9 @@ import timeit
 import traceback
 import typing
 import warnings
-from collections import OrderedDict, defaultdict, namedtuple
+from collections import Counter, OrderedDict, defaultdict, namedtuple
 from dataclasses import dataclass
+from enum import Enum, auto
 from functools import cached_property, partial
 from inspect import signature
 from itertools import chain, count
@@ -44,6 +46,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import p_tqdm
+import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import seaborn as sns
@@ -58,14 +61,16 @@ from einops import rearrange, repeat
 from einops.layers.torch import Rearrange
 from IPython import get_ipython
 from IPython.display import display
+from natsort import natsorted
 from numba import njit
 from PIL import Image, ImageOps
 from plotly.subplots import make_subplots
 from rich import print as print_tmp
 from scipy.optimize import linear_sum_assignment
 from scipy.spatial import distance
+from scoping import scoping
 from shapely import ops, union, union_all
-from shapely.geometry import LineString, MultiLineString, MultiPoint, Point, Polygon
+from shapely.geometry import LineString, MultiLineString, MultiPoint, Point, Polygon, box, mapping
 from sklearn.metrics import accuracy_score, classification_report
 from tabulate import tabulate
 from torch.utils.data import DataLoader, Dataset, Subset, TensorDataset
@@ -221,32 +226,48 @@ def my_print(*args, **kwargs):
     info = traceback.format_stack()[-2]
     end = info.index(",", info.index(",") + 1)
     line_number = traceback.format_stack()[-2][7:end]
-    if not is_notebook():
-        # print_tmp(*args, f"{line_number}", **kwargs)
-        print_tmp(*args, **kwargs)
+    if is_notebook():
+        print_tmp(*args, f"{line_number}", **kwargs)
+        # print_tmp(*args, **kwargs)
     else:
         print_tmp(*args, **kwargs)
 
 
-builtins.print = my_print
+default_print = print
+print = my_print
+
+
+from pypalettes import get_hex, get_rgb, load_cmap
 
 
 def color_map(n):
-    from pypalettes import get_hex, get_rgb, load_cmap
-
-    colors = get_rgb(["Signac", "Antique"])
-    return colors[n % len(colors)]
+    return color_map.colors[n % len(color_map.colors)]
 
 
-# for x in mpl.colormaps:
-#     print(x)
-#     try:
-#         print(len(mpl.colormaps[x].colors))
-#     except:
-#         pass
-# color_map(0)
-# print(mpl.colormaps)
-# exit()
+colors = get_rgb(["Acanthurus_olivaceus", "Signac", "Antique"])
+colors = [
+    c
+    for i, c in enumerate(colors)
+    if i in [0, 1, 2, 3, 4, 7, 8, 10, 12, 13, 15, 17, 18, 19, 20, 21, 22, 23, 25, 28, 29, 30, 31]
+]
+color_map.colors = colors
+
+
+def test_color_map():
+    fig, ax = plt.subplots(figsize=(6, 2))
+    colors = color_map.colors
+    colors = [(r / 255, g / 255, b / 255) for r, g, b in colors]
+    # Plot each color as a rectangle
+    for i, color in enumerate(colors):
+        ax.add_patch(plt.Rectangle((i, 0), 1, 1, color=color))
+
+    # Set the limits and hide the axes
+    ax.set_xlim(0, len(colors))
+    ax.set_ylim(0, 1)
+    ax.axis("off")
+
+    # Display the plot
+    plt.show()
 
 
 def shapely_to_numpy(shapely_obj):
@@ -349,15 +370,25 @@ def plot_images(images, img_width=None, max_images=5, parallel=False, parallel_s
     if isinstance(images, mpl.axes.Axes):
         plot_images(seaborn_to_array(images), img_width=img_width, max_images=max_images)
         return
-    if not isinstance(images, abc.Sequence) and (
-        isinstance(images, np.ndarray) and len(images.shape) == 3 or len(images.shape) == 2
-    ):
+    if not isinstance(images, abc.Sequence):
         images = [images]
+    images = images[:max_images]
+    L = len(images)
+    images = flatten_list(images)
+    for i in range(len(images)):
+        if isinstance(images[i], torch.Tensor):
+            images[i] = transforms.ToPILImage()(images[i])
+            images[i] = np.array(images[i])
+            if images[i].max() > 1 and images[i].dtype == torch.float32:
+                images[i] = 255 - images[i]
+
     if not is_notebook():
         for image in images:
-            with tempfile.NamedTemporaryFile(suffix=".png") as f:
+            with tempfile.NamedTemporaryFile(suffix=".jpg") as f:
                 if image.max() <= 1:
                     image = (image * 255).astype(np.uint8)
+                if len(image.shape) == 3 and image.shape[2] == 4:
+                    image = png_to_jpg(image)
                 cv2.imwrite(f.name, image)
                 # os.system(
                 #     f"convert {f.name} -resize {img_width if img_width else 200} -alpha off sixel:-"
@@ -366,17 +397,6 @@ def plot_images(images, img_width=None, max_images=5, parallel=False, parallel_s
                 os.system(f"img2sixel -w{img_width if img_width else 200} {f.name}")
                 print()
         return
-    images = images[:max_images]
-    L = len(images)
-    images = flatten_list(images)
-    for i in range(len(images)):
-        if isinstance(images[i], torch.Tensor):
-            images[i] = transforms.ToPILImage()(images[i])
-            images[i] = np.array(images[i])
-            scale = images[i].max() > 1 and images[i].dtype == torch.float32
-            images[i] = np.array(transforms.ToPILImage()(images[i]))
-            if scale:
-                images[i] = 255 - images[i]
 
     cols = len(images) // L
     if len(images) == 1:
@@ -412,6 +432,29 @@ class ThresholdTransform(object):
         return f"ThresholdTransform({self.thr})"
 
 
+def png_to_jpg(image):
+    # Open the PNG image
+    img = Image.fromarray(image)
+    # Ensure the image has an alpha channel (RGBA)
+    if img.mode == "RGBA":
+        # Split the image into its red, green, blue, and alpha channels
+        r, g, b, a = img.split()
+
+        # Create a grayscale version of the alpha channel
+        gray_alpha = a.convert("L")
+
+        # Merge the RGB channels with the grayscale version of the alpha channel
+        img = Image.merge("RGB", (r, g, b))
+
+        # Create a new image by pasting the grayscale onto the image
+        img_with_gray_alpha = Image.composite(
+            img, Image.new("RGB", img.size, (0, 0, 0)), gray_alpha
+        )
+        return np.array(img_with_gray_alpha)
+    else:
+        return image
+
+
 def reshape_to_square(image, desired_size, color=(255, 255, 255), verbose=False):
     old_image_height, old_image_width, channels = image.shape
     ratio = old_image_height / old_image_width
@@ -434,13 +477,15 @@ def reshape_to_square(image, desired_size, color=(255, 255, 255), verbose=False)
         return result
 
 
-def padding(img, size):
+def padding(img, sizes):
     h, w, c = img.shape
+    if isinstance(sizes, int):
+        sizes = (sizes, sizes)
     img_pad = np.pad(
         img,
         (
-            (size - (h % size) if h % size != 0 else 0, 0),
-            (0, (size - (w % size) if w % size != 0 else 0)),
+            (sizes[0] - (h % sizes[0]) if h % sizes[0] != 0 else 0, 0),
+            (0, (sizes[1] - (w % sizes[1]) if w % sizes[1] != 0 else 0)),
             (0, 0),
         ),
         mode="constant",
@@ -449,7 +494,7 @@ def padding(img, size):
     return img_pad
 
 
-def specify_padding(img, w, h, fill):
+def resize_with_padding(img, w, h, fill):
     img_pad = np.pad(
         img,
         (
@@ -617,8 +662,31 @@ def draw_line(
     return img
 
 
-def create_grid(images, **args):
+def slice_image_into_windows(img, window_size, stride=0):
+    h, w, c = img.shape
     p = []
+    i = 0
+    while i + window_size <= h:
+        j = 0
+        while j + window_size <= w:
+            s = img[i : i + window_size, j : j + window_size]
+            p.append(s)
+            j += window_size + stride
+        i += window_size + stride
+    return p
+
+
+# a = np.full((80, 80, 4), 255, dtype=np.uint8)
+# for x in slice_image_into_windows(a, 50, -20):
+#     print(x.shape)
+# exit()
+
+
+def create_grid(images, window_size=100, **args):
+    p = []
+    if not isinstance(images, list):
+        args["nrow"] = images.shape[1] // window_size
+        images = slice_image_into_windows(images, window_size)
     for image in images:
         s = torch.tensor(image)
         s = s.permute(2, 0, 1)
@@ -664,6 +732,7 @@ def take(sequence, axis):
 # def stratified_sampling(dataset: Dataset, train_samples_per_class: int):
 #     import collections
 
+
 #     train_indices = []
 #     val_indices = []
 #     target_counter = collections.Counter()
@@ -684,3 +753,44 @@ def take(sequence, axis):
 #         torch.cat([torch.tensor([x[1]]) for x in val_dataset]),
 #     )
 #     return train_dataset, val_dataset
+def path_like_sort(file_list):
+    return natsorted(file_list)
+
+
+def white_image(size, channels=3):
+    size = tuple(size) + (channels,)
+    return np.full(size, 255, dtype=np.uint8)
+
+
+class CartesianImage:
+    def __init__(self, image) -> None:
+        self.image = image
+        self.h, self.w, self.c = image.shape
+
+    def __getitem__(self, index):
+        index = np.array(index)
+        if issubclass(index.dtype.type, np.floating):
+            x, y = index
+            if x > 1 or y > 1:
+                raise ValueError("x and y must be less than 1")
+            if x < 0 or y < 0:
+                raise ValueError("x and y must be greater than 0")
+            x, y = index
+            y = 1 - y
+            return self.image[
+                np.clip(int(y * self.h), 0, self.h - 1), np.clip(int(x * self.w), 0, self.w - 1)
+            ]
+        else:
+            x, y = index
+            if isinstance(y, slice):
+                a, b, c = y.indices(self.h)
+                new_slice = slice(self.h - b, self.h - a, c)
+            return self.image[new_slice, x]
+            # return self.image[self.h - y, x]
+
+
+# a = cv2.imread("test_images/circuit50038.png")
+# plot_images(a, -1)
+# print(a.shape)
+# plot_images(CartesianImage(a)[10:90, 150:220], -1)
+# plot_images(CartesianImage(a)[10:90, 600:700], -1)

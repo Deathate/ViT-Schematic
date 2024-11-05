@@ -7,6 +7,9 @@ custom_datasets/
 data_distribution_50/
 dataset_fullimg/
 dataset_fullimg_mask/
+cc_deathate_data/
 moco_test/
 tmp/
 wandb/
+cache/
+weights/

@@ -7,6 +7,8 @@ EMBED_DIM = 32
 # PRETRAINED_PATH = "runs/FormalDatasetWindowedLinePair/0912_17-40-37/best.pth"
 PRETRAINED_PATH = "runs/FormalDatasetWindowedLinePair/0919_04-16-20/best.pth"
 # runs/FormalDatasetWindowedLinePair/0925_01-02-38
+BEST_MODEL_PATH = "runs/FormalDatasetWindowedLinePair/0925_11-14-32/best.pth"
+BEST_MODEL_L_PATH = "runs/FormalDatasetWindowedLinePair/0925_11-13-18/best.pth"
 KEEP_OPTIMIZER = False
 KEEP_EPOCH = False
 LEARNING_RATE = 1e-4

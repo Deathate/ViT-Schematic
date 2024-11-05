@@ -1,119 +1,111 @@
 # %%
 from collect_connection import build_connection
-from main_line import *
+
+# from main_line import *
+from main_line_robust import *
 from Model import *
 
 
 class TestWindowed(Datasetbehaviour):
 
-    def __init__(self, img, interval, window_size):
-        img = padding(img, window_size)
-        h, w, c = img.shape
-        p = []
-        for i in range(0, h, window_size // interval):
-            for j in range(0, w, window_size // interval):
-                s = img[i : i + window_size, j : j + window_size]
-                p.append(s)
-        self.dataset = p
-        self.i = 0
+    def __init__(self, img, stride, window_size):
+        self.dataset = slice_image_into_windows(img, window_size, stride)
         super().__init__(len(self.dataset), self.__create, always_reset=True, log2console=False)
 
-    def __create(self):
-        result = self.dataset[self.i]
-        self.i += 1
+    def __create(self, i):
+        result = self.dataset[i]
         return result, 0
 
 
 class OneTimeWrapper(Datasetbehaviour):
 
-    def __init__(self, img):
-        self.dataset = img
-        super().__init__(1, self.__create, always_reset=True, log2console=False)
+    def __init__(self, imgs):
+        self.dataset = imgs
+        super().__init__(len(imgs), self.__create, always_reset=True, log2console=False)
 
-    def __create(self):
-        return self.dataset, 0
-
-
-current_dir = Path(__file__).parent
-model = Model(
-    xtransform=xtransform,
-    log2console=False,
-)
-try:
-    model.fit(
-        create_model(),
-        pretrained_path=current_dir / "aruns/FormalDatasetWindowedLinePair/0925_11-14-32/best.pth",
-    )
-except:
-    model.fit(
-        create_model(),
-        pretrained_path=current_dir / "weights/mix_best.pth",
-    )
-model_l = Model(
-    xtransform=xtransform,
-    log2console=False,
-)
-try:
-    model_l.fit(
-        create_model(),
-        pretrained_path=current_dir / "runs/FormalDatasetWindowedLinePair/0925_11-13-18/best.pth",
-    )
-except:
-    model_l.fit(
-        create_model(),
-        pretrained_path=current_dir / "weights/line_best.pth",
-    )
+    def __create(self, i):
+        return self.dataset[i][0], 0
 
 
-def predict_mask_img(img, threshold):
-    img = img.copy()
-    tmp = OneTimeWrapper(img)
-    result = model.inference(tmp, verbose=False)
-    result = legalize_line(result[0].cpu().numpy(), threshold)
-    return result
+model = None
 
 
-def predict_line_only_img(img, threshold):
-    img = img.copy()
-    img[:, :, 3] = 255
-    tmp = OneTimeWrapper(img)
-    result = model_l.inference(tmp, verbose=False)
-    result = legalize_line(result[0].cpu().numpy(), threshold)
-    return result
+def load_model(
+    model_path,
+):
+    current_dir = Path(__file__).parent
+    weight_dir = current_dir / Path("weights")
+    weight_dir.mkdir(exist_ok=True)
+    model_path_dir = Path(model_path).parent
+    weight_path = weight_dir / model_path_dir.name
+    if model_path_dir.exists():
+        if weight_path.exists():
+            shutil.rmtree(weight_path)
+        shutil.copytree(model_path_dir, weight_path)
+    global model
+    if model is None:
+        model = Model(
+            xtransform=xtransform,
+            log2console=False,
+        )
+        model.fit(
+            create_model(),
+            pretrained_path=weight_path / "best.pth",
+        )
 
 
-# %%
+def predict_mask_imgs(imgs, threshold):
+    tmp = OneTimeWrapper(imgs)
+    result = model.inference(tmp, verbose=False).cpu().numpy()
+    # plot_images(draw_line(imgs[2][0], result[2]), 300)
+    legalized_lines = []
+    for i in range(len(result)):
+        t = legalize_line(result[i], threshold)
+        legalized_lines.append(t)
+    # plot_images(draw_line(imgs[2][0], legalized_lines[2]), 300)
+    # exit()
+    return legalized_lines
+
+
+np.set_printoptions(precision=2)
+
+
+def calculate_line_angle(x1, y1, x2, y2):
+    # Calculate the differences
+    dx = x2 - x1
+    dy = y2 - y1
+
+    # Calculate the angle in radians
+    angle_radians = math.atan2(abs(dy), abs(dx))
+
+    # Convert the angle to degrees
+    angle_degrees = math.degrees(angle_radians)
+
+    return angle_degrees
+
+
 def legalize_line(lines, threshold):
     for j, line in enumerate(lines):
-        # r = 0.03
-        # if line[0, 0] < r:
-        #     line[0, 0] = 0
-        # if line[0, 1] < r:
-        #     line[0, 1] = 0
-        # if line[1, 0] < r:
-        #     line[1, 0] = 0
-        # if line[1, 1] < r:
-        #     line[1, 1] = 0
-        # if line[0, 0] > 1 - r:
-        #     line[0, 0] = 1
-        # if line[0, 1] > 1 - r:
-        #     line[0, 1] = 1
-        # if line[1, 0] > 1 - r:
-        #     line[1, 0] = 1
-        # if line[1, 1] > 1 - r:
-        #     line[1, 1] = 1
-        if abs(line[0, 0] - line[1, 0]) < abs(line[0, 1] - line[1, 1]):
-            m = (line[0, 0] + line[1, 0]) / 2
-            line[0, 0] = m
-            line[1, 0] = m
-        else:
-            m = (line[0, 1] + line[1, 1]) / 2
-            line[0, 1] = m
-            line[1, 1] = m
+        # clip line to 0 and 1
+        line = np.clip(line, 0, 1)
+        angle = calculate_line_angle(*line[0], *line[1])
+        if abs(angle - 45) > min(angle, 90 - angle):
+            if abs(line[0, 0] - line[1, 0]) < abs(line[0, 1] - line[1, 1]):
+                m = (line[0, 0] + line[1, 0]) / 2
+                line[0, 0] = m
+                line[1, 0] = m
+                if line[0, 1] < line[1, 1]:
+                    line = line[[1, 0]]
+            else:
+                m = (line[0, 1] + line[1, 1]) / 2
+                line[0, 1] = m
+                line[1, 1] = m
+                if line[0, 0] > line[1, 0]:
+                    line = line[[1, 0]]
         lines[j] = line
     new_lines = []
     for line in lines:
-        if np.linalg.norm(line[0] - line[1]) > threshold:
+        if norm1(line[0], line[1]) > threshold:
             new_lines.append(line)
     new_lines = np.array(new_lines)
     return new_lines
@@ -122,364 +114,385 @@ def legalize_line(lines, threshold):
 @torch.no_grad()
 @hidden_matplotlib_plots
 def analyze_connection(
-    path,
+    dataset_config,
+    input_img,
+    draw_img,
     min_line_length,
+    interval,
     local_threshold,
-    global_threshold,
     remove_duplicate,
+    exclude_white_points,
     optimal_shift,
     boundary,
     strict_match,
     strict_match_threshold,
     debug,
     debug_shift_optimization,
+    debug_img_width,
     debug_cell,
 ):
-    soft_match = False
+    input_img = input_img.copy()
+    draw_img = draw_img.copy()
+
+    load_model(config.get_best_model_path(dataset_config))
     if not debug and debug_shift_optimization:
         warnings.warn("debug_shift_optimization is disabled because debug is disabled")
         debug_shift_optimization = False
     with HiddenPrints(disable=debug), HiddenPlots(disable=debug):
-        slice_size = 50
-        interval = 1
-        if not isinstance(path, str):
-            with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as f:
-                cv2.imwrite(f.name, path)
-                path = f.name
-        input_img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
-        ori_img = padding(input_img, slice_size)
-        ori_img = specify_padding(ori_img, slice_size, slice_size, fill=255)
-        shift_x, shift_y = 0, 0
-        if optimal_shift:
-            shift_x, shift_y = calculate_optimal_shift(
-                slice_size, ori_img, boundary, debug_shift_optimization
-            )
-            print("optimal_shift_x:", shift_x)
-            print("optimal_shift_y:", shift_y)
-            ori_img = shift(ori_img, (shift_x, shift_y), fill=255)
-        num_column = math.ceil(ori_img.shape[1] / slice_size)
-        num_row = math.ceil(ori_img.shape[0] / slice_size)
-        dataset = TestWindowed(ori_img, interval, slice_size)
+        slice_size = config.IMAGE_SIZE
+        cropped_slice_size = slice_size - 2 * interval
+        # plot_images(input_img, -1)
+        # ori_img = padding(input_img, slice_size)
+        # plot_images(ori_img, -1)
+        # print(slice_size)
+        # print(input_img.shape)
+        # exit()
+        # shift_x, shift_y = 0, 0
+        # if optimal_shift:
+        # ori_img = resize_with_padding(ori_img, slice_size, slice_size, fill=255)
+        # shift_x, shift_y = calculate_optimal_shift(
+        #     slice_size, ori_img, boundary, debug_shift_optimization
+        # )
+        # print("optimal_shift_x:", shift_x)
+        # print("optimal_shift_y:", shift_y)
+        # ori_img = shift(ori_img, (shift_x, shift_y), fill=255)
+        ori_img = padding(input_img, cropped_slice_size)
+        num_column = math.ceil(ori_img.shape[1] / cropped_slice_size)
+        num_row = math.ceil(ori_img.shape[0] / cropped_slice_size)
+        # print("num_column:", num_column)
+        # print("num_row:", num_row)
 
+        image_copy = ori_img.copy()
+        ori_img = resize_with_padding(ori_img, interval * 2, interval * 2, fill=255)
+        ori_img = shift(ori_img, (interval, interval), fill=255)
+        grid_spacing_ratio = interval / slice_size
+        r = 0
+        second_box = box(
+            grid_spacing_ratio + r,
+            grid_spacing_ratio + r,
+            1 - grid_spacing_ratio - r,
+            1 - grid_spacing_ratio - r,
+        )
+        difference_box = box(0, 0, 1, 1) - second_box
+        dataset = TestWindowed(ori_img, -2 * interval, slice_size)
         image_set = []
-        global_line = []
         local_lines = {}
-
+        predict_results = predict_mask_imgs(dataset, min_line_length)
         for i in range(len(dataset)):
+            image_ori = dataset[i][0]
             image_bk = dataset[i][0][:, :, :3]
             image_bk_gray = cv2.cvtColor(image_bk, cv2.COLOR_BGR2GRAY)
-            if image_bk.shape != (slice_size, slice_size, 3):
-                continue
             image = image_bk.copy()
             mask = dataset[i][0][:, :, 3:]
-            image_without_mask = image[:, :, :3][np.repeat((mask > 240), 3, axis=-1)]
-            row_idx = i // (num_column * interval)
-            col_idx = i % (num_column * interval)
+            row_idx = i // (num_column)
+            col_idx = i % (num_column)
             anchor = (
-                col_idx * slice_size / interval,
-                (num_row * interval - row_idx - interval) * slice_size / interval,
+                col_idx * cropped_slice_size,
+                (num_row - row_idx - 1) * cropped_slice_size,
             )
-            if image_without_mask.size != 0 and image_without_mask.mean() / 255 <= 0.999:
-                mode = -1
+            if image.mean() < 254.5:
                 lines = []
-                if mask.mean() >= 254:
-                    lines = predict_line_only_img(dataset[i][0], min_line_length)
-                    mode = 1
-                else:
-                    lines = predict_mask_img(dataset[i][0], min_line_length)
-                    mode = 2
-                filtered = []
-                for line in lines:
-                    for point in line:
-                        start = int(point[0] * slice_size)
-                        end = int((1 - point[1]) * slice_size)
-                        radius = 3
-                        radius_pixel = image_bk_gray[
-                            max(end - radius, 0) : min(end + radius, slice_size - 1),
-                            max(start - radius, 0) : min(start + radius, slice_size - 1),
-                        ]
-                        # if (row_idx, col_idx) == (4, 1):
-                        #     print(line, radius_pixel, start, end)
-                        if radius_pixel.size > 0 and radius_pixel.mean() == 255:
+                lines = predict_results[i]
+                if exclude_white_points:
+                    filtered = []
+                    for line in lines:
+                        if (
+                            CartesianImage(image_ori)[line[0]][-1] != 255
+                            and CartesianImage(image_ori)[line[1]][-1] != 255
+                        ):
                             filtered.append(False)
-                            break
-                    else:
-                        filtered.append(True)
-                # if (row_idx, col_idx) == (4, 1):
-                #     print(lines)
-                #     exit()
-                lines = lines[filtered]
-                # if row_idx == 0 and col_idx == 0:
-                if len(lines) > 0:
-                    local_lines[(row_idx, col_idx)] = (lines, anchor)
+                        else:
+                            for point in line:
+                                start = int(point[0] * slice_size)
+                                end = int((1 - point[1]) * slice_size)
+                                radius = 3
+                                radius_pixel = image_bk_gray[
+                                    max(end - radius, 0) : min(end + radius, slice_size - 1),
+                                    max(start - radius, 0) : min(start + radius, slice_size - 1),
+                                ]
+                                if radius_pixel.size > 0 and radius_pixel.mean() >= 250:
+                                    filtered.append(False)
+                                    break
+                            else:
+                                filtered.append(True)
+                    lines = lines[filtered]
+                new_lines = []
+                for line in lines:
+                    k = LineString(line) - difference_box
+                    if isinstance(k, LineString):
+                        cropped_lines = np.array(k.coords)
+                        if cropped_lines.size > 0:
+                            new_lines.append(cropped_lines)
+                new_lines = np.array(new_lines)
+                new_lines -= interval / slice_size
+                new_lines *= slice_size / cropped_slice_size
+                new_lines = np.clip(new_lines, 0, 1)
+                if len(new_lines) > 0:
+                    local_lines[(row_idx, col_idx)] = (
+                        new_lines,
+                        anchor,
+                        CartesianImage(image_ori)[
+                            interval : -interval + slice_size, interval : -interval + slice_size
+                        ],
+                    )
                 if [row_idx, col_idx] in [
                     debug_cell,
                     [debug_cell[0] + 1, debug_cell[1]],
                     [debug_cell[0], debug_cell[1] + 1],
                 ]:
-                    print(mode)
+                    plot_images(draw_line(dataset[i][0].copy(), lines, thickness=1), 300)
                     print("mask mean value:", mask.mean())
                     print("lines")
                     print(lines)
-                    # print("anchor")
-                    # print(lines * slice_size + anchor)
-                    # print("line only")
-                    # l = predict_line_only_img(dataset[i][0])
-                    # plot_images(draw_line(dataset[i][0].copy(), l, thickness=1), 300)
-                    # print("mask")
-                    # l = predict_mask_img(dataset[i][0])
-                    # plot_images(draw_line(dataset[i][0].copy(), l, thickness=1), 300)
-                    plot_images(draw_line(dataset[i][0].copy(), lines, thickness=1), 300)
+                    plot_images(
+                        draw_line(
+                            CartesianImage(dataset[i][0].copy())[
+                                interval : -interval + slice_size, interval : -interval + slice_size
+                            ],
+                            new_lines,
+                            thickness=1,
+                        ),
+                        300,
+                    )
+                    print("new_lines")
+                    print(new_lines)
 
                 image = draw_line(image, lines, thickness=2)
-
             image = np.concatenate((image, mask), axis=-1)
-            if row_idx % interval == 0 and col_idx % interval == 0:
-                image_set.append(image)
+            image = CartesianImage(image)[
+                interval : -interval + slice_size, interval : -interval + slice_size
+            ]
+            image_set.append(image)
+
+        print("model prediction figure")
+        plot_images(
+            create_grid(
+                image_set,
+                nrow=num_column,
+                padding=1,
+                pad_value=127,
+            ),
+            debug_img_width,
+        )
 
         # remove silimar lines
-        threhold = 3
-        for i, j in itertools.product(range(num_row), range(num_column)):
-            if (i, j) not in local_lines:
-                continue
-            group, group_anchor = local_lines[(i, j)]
-            filtered = []
-            if (i, j + 1) in local_lines:
-                group_right, group_right_anchor = local_lines[(i, j + 1)]
-                for line in group:
-                    line_g = line * slice_size + group_anchor
-                    for rline in group_right:
-                        rline_g = rline * slice_size + group_right_anchor
-                        if (
-                            norm1(line_g[0], rline_g[0]) < threhold
-                            and norm1(line_g[1], rline_g[1]) < threhold
-                        ) or (
-                            norm1(line_g[0], rline_g[1]) < threhold
-                            and norm1(line_g[1], rline_g[0]) < threhold
-                        ):
-                            filtered.append(False)
-                            # print(line, rline_g)
-                            # print(i,j)
-                            # exit()
-                            break
-                    else:
-                        filtered.append(True)
-                group = group[filtered]
-            filtered = []
-            if (i + 1, j) in local_lines:
-                group_bottom, group_bottom_anchor = local_lines[(i + 1, j)]
-                for line in group:
-                    line_g = line + group_anchor
-                    for rline in group_bottom:
-                        rline_g = rline * slice_size + group_bottom_anchor
-                        if (
-                            norm1(line_g[0], rline_g[0]) < threhold
-                            and norm1(line_g[1], rline_g[1]) < threhold
-                        ) or (
-                            norm1(line_g[0], rline_g[1]) < threhold
-                            and norm1(line_g[1], rline_g[0]) < threhold
-                        ):
-                            filtered.append(False)
-                            # print(line, rline_g)
-                            # print(i, j)
-                            # exit()
-                            break
-                    else:
-                        filtered.append(True)
-                group = group[filtered]
-            local_lines[(i, j)] = (group, local_lines[(i, j)][1])
+        # threhold = 3
+        # for i, j in itertools.product(range(num_row), range(num_column)):
+        #     if (i, j) not in local_lines:
+        #         continue
+        #     group, group_anchor, _ = local_lines[(i, j)]
+        #     filtered = []
+        #     if (i, j + 1) in local_lines:
+        #         group_right, group_right_anchor, _ = local_lines[(i, j + 1)]
+        #         for line in group:
+        #             line_g = line * slice_size + group_anchor
+        #             for rline in group_right:
+        #                 rline_g = rline * slice_size + group_right_anchor
+        #                 if (
+        #                     norm1(line_g[0], rline_g[0]) < threhold
+        #                     and norm1(line_g[1], rline_g[1]) < threhold
+        #                 ) or (
+        #                     norm1(line_g[0], rline_g[1]) < threhold
+        #                     and norm1(line_g[1], rline_g[0]) < threhold
+        #                 ):
+        #                     filtered.append(False)
+        #                     break
+        #             else:
+        #                 filtered.append(True)
+        #         group = group[filtered]
+        #     filtered = []
+        #     if (i + 1, j) in local_lines:
+        #         group_bottom, group_bottom_anchor, _ = local_lines[(i + 1, j)]
+        #         for line in group:
+        #             line_g = line + group_anchor
+        #             for rline in group_bottom:
+        #                 rline_g = rline * slice_size + group_bottom_anchor
+        #                 if (
+        #                     norm1(line_g[0], rline_g[0]) < threhold
+        #                     and norm1(line_g[1], rline_g[1]) < threhold
+        #                 ) or (
+        #                     norm1(line_g[0], rline_g[1]) < threhold
+        #                     and norm1(line_g[1], rline_g[0]) < threhold
+        #                 ):
+        #                     filtered.append(False)
+        #                     break
+        #             else:
+        #                 filtered.append(True)
+        #         group = group[filtered]
+        #     local_lines[(i, j)] = (group, *local_lines[(i, j)][1:])
 
-        # combine lines between slices
+        # combine lines between grids
         if strict_match:
             threshold = strict_match_threshold
             for i, j in itertools.product(range(num_row), range(num_column)):
                 if (i, j) not in local_lines:
                     continue
-                on_border_set = local_lines[(i, j)][0]
+                on_border_set, _, img = local_lines[(i, j)]
                 if (i, j + 1) in local_lines:
-                    matches_left = []
+                    qualified = []
+                    matches_right = []
+                    for line in on_border_set:
+                        a = line[1]
+                        if abs(line[0, 0] - line[1, 0]) > abs(line[0, 1] - line[1, 1]):
+                            if a[0] >= 1 - threshold and CartesianImage(img)[a][3] >= 250:
+                                qualified.append(a)
+                    # if [i, j] == debug_cell:
+                    #     print("qualified")
+                    #     print(qualified)
+                    #     plot_images(img, 300)
+                    #     exit()
                     # grid right
                     for line in local_lines[(i, j + 1)][0]:
-                        for a in line:
-                            if a[0] <= threshold:
-                                matches_left.append(a)
-                    qualified = []
-                    for line in on_border_set:
-                        for aidx, a in enumerate(line):
-                            if a[0] >= 1 - threshold:
-                                qualified.append(a)
-                    for line in on_border_set:
-                        for aidx, a in enumerate(line):
-                            if a[0] >= 1 - threshold:
-                                if len(matches_left) > 0:
-                                    shift_match = np.array(matches_left)
-                                    shift_match[:, 0] += 1
-                                    matched_distances = distance.cdist([a], shift_match)
-                                    m = matches_left[np.argmin(matched_distances)]
-                                    if abs(line[0, 1] - line[1, 1]) < abs(line[0, 0] - line[1, 0]):
-                                        a[0] = 1
-                                        a[1] = m[1]
-                                        m[0] = 0
-                                    else:
-                                        if soft_match:
-                                            shift_m = m.copy()
-                                            shift_m[0] = 1
-                                            dists = distance.cdist(line, [shift_m])
-                                            if aidx == np.argmin(dists):
-                                                local_dists = distance.cdist(qualified, [shift_m])
-                                                if (qualified[np.argmin(local_dists)] == a).all():
-                                                    a[0] = 1
-                                                    a[1] = m[1]
-                                                    m[0] = 0
+                        a = line[0]
+                        if a[0] <= threshold:
+                            matches_right.append(a)
+                    if len(qualified) > 0 and len(matches_right) > 0:
+                        shift_match = np.array(matches_right)
+                        shift_match[:, 0] += 1
+                        matches = linear_sum_assignment(distance.cdist(qualified, shift_match))
+                        for aidx, midx in zip(*matches):
+                            a = qualified[aidx]
+                            m = matches_right[midx]
+                            a[0] = 1
+                            a[1] = m[1]
+                            m[0] = 0
+                            # if [i, j] == debug_cell:
+                            #     print(f"match right: {a} -> {m}")
 
                 if (i + 1, j) in local_lines:
-                    matches_bottom = []
-                    # grid bottom
-                    for line in local_lines[(i + 1, j)][0]:
-                        for a in line:
-                            if a[1] >= 1 - threshold:
-                                matches_bottom.append(a)
                     qualified = []
                     for line in on_border_set:
-                        for aidx, a in enumerate(line):
-                            if a[1] <= threshold:
+                        a = line[1]
+                        if abs(line[0, 0] - line[1, 0]) < abs(line[0, 1] - line[1, 1]):
+                            if a[1] <= threshold and CartesianImage(img)[a][3] == 255:
                                 qualified.append(a)
-                    for line in on_border_set:
-                        for aidx, a in enumerate(line):
-                            if a[1] <= threshold:
-                                if len(matches_bottom) > 0:
-                                    shift_match = np.array(matches_bottom)
-                                    shift_match[:, 1] = 1 - shift_match[:, 1]
-                                    matched_distances = distance.cdist([a], shift_match)
-                                    m = matches_bottom[np.argmin(matched_distances)]
-                                    if abs(line[0, 1] - line[1, 1]) > abs(line[0, 0] - line[1, 0]):
-                                        a[0] = m[0]
-                                        a[1] = 0
-                                        m[1] = 1
-                                        # if [i, j] == [2, 6]:
-                                        #     print(on_border_set)
-                                        #     print(matches_bottom)
-                                        #     print(shift_match)
-                                        #     print(matches_bottom)
-                                        #     exit()
-                                    else:
-                                        if soft_match:
-                                            shift_m = m.copy()
-                                            shift_m[1] = 2
-                                            dists = distance.cdist(line, [shift_m])
-                                            if aidx == np.argmin(dists):
-                                                local_dists = distance.cdist(qualified, [shift_m])
-                                                if (qualified[np.argmin(local_dists)] == a).all():
-                                                    a[0] = m[0]
-                                                    a[1] = 0
-                                                    m[1] = 1
+                    # grid bottom
+                    matches_bottom = []
+                    for line in local_lines[(i + 1, j)][0]:
+                        a = line[0]
+                        if a[1] >= 1 - threshold:
+                            matches_bottom.append(a)
+                    if len(qualified) > 0 and len(matches_bottom) > 0:
+                        shift_match = np.array(matches_bottom)
+                        shift_match[:, 1] += -1
+                        matches = linear_sum_assignment(distance.cdist(qualified, shift_match))
+                        for aidx, midx in zip(*matches):
+                            a = qualified[aidx]
+                            m = matches_bottom[midx]
+                            a[0] = m[0]
+                            a[1] = 0
+                            m[1] = 1
+                    if (i + 1, j + 1) in local_lines:
+                        qualified = []
+                        for line in on_border_set:
+                            for aidx, a in enumerate(line):
+                                if a[1] <= threshold and CartesianImage(img)[a][3] == 255:
+                                    qualified.append(a)
+                        # grid bottom
+                        matches_bottom = []
+                        for line in local_lines[(i + 1, j)][0]:
+                            for a in line:
+                                if a[1] >= 1 - threshold:
+                                    matches_bottom.append(a)
+                        if len(qualified) > 0 and len(matches_bottom) > 0:
+                            shift_match = np.array(matches_bottom)
+                            shift_match[:, 1] += -1
+                            matches = linear_sum_assignment(distance.cdist(qualified, shift_match))
+                            for aidx, midx in zip(*matches):
+                                a = qualified[aidx]
+                                m = matches_bottom[midx]
+                                a[0] = m[0]
+                                a[1] = 0
+                                m[1] = 1
 
                 if [i, j] == debug_cell:
+                    plot_images(img, 300)
                     print("group")
                     print(on_border_set)
-                    print("matches left")
-                    print(matches_left)
+                    print("matches right")
+                    print(matches_right)
                     print("matches bottom")
                     print(matches_bottom)
-        local_connection_group = {}
-        for pos, (lines, anchor) in list(local_lines.items()):
-            connection = build_connection(
-                lines,
-                norm1,
-                similar_threshold=0,
-                threshold=local_threshold,
-                duplicate_threshold=local_threshold,
-            )
-            local_connection_group[pos] = (connection, anchor)
-            # if pos == (3, 7):
-            #     print(lines)
-            #     print(connection)
-            #     exit()
+                    # exit()
+        # print(local_lines[2, 3][0])
+        # print(local_lines[2, 4][0])
+        # exit()
+        grid_lines = []
+        for key, value in list(local_lines.items()):
+            lines = value[0]
+            lines[:, :, 0] += key[1]
+            lines[:, :, 1] += num_row - key[0] - 1
+            grid_lines.extend(lines.tolist())
+
         # convert to global coordinate
-        global_line = []
-        for pos, (lines, anchor) in list(local_lines.items()):
-            for line in lines:
-                line[0][0] = anchor[0] + line[0][0] * slice_size
-                line[0][1] = anchor[1] + line[0][1] * slice_size
-                line[1][0] = anchor[0] + line[1][0] * slice_size
-                line[1][1] = anchor[1] + line[1][1] * slice_size
-                line[:, 0] /= ori_img.shape[1]
-                line[:, 1] /= ori_img.shape[0]
-                global_line.append(line.tolist())
-        global_connection = []
-        for pos, (groups, anchor) in list(local_connection_group.items()):
-            for i in range(len(groups)):
-                groups[i] = np.array(groups[i])
-            for group in groups:
-                group[:, 0] = group[:, 0] * slice_size + anchor[0]
-                group[:, 1] = group[:, 1] * slice_size + anchor[1]
-                group[:, 0] /= ori_img.shape[1]
-                group[:, 1] /= ori_img.shape[0]
-                global_connection.append(group.tolist())
-            # if pos == (2, 1) or pos == (2, 2):
-            #     print(groups)
-        group_connection = build_connection(
-            global_connection,
+        # global_line = []
+        # for line in grid_lines:
+        #     line = np.array(line) * cropped_slice_size + interval
+        #     line[:, 0] /= ori_img.shape[1]
+        #     line[:, 1] /= ori_img.shape[0]
+        #     global_line.append(line.tolist())
+        # plot_images(ori_img, debug_img_width)
+        # plot_images(draw_line(ori_img, box=global_line, scale=True), debug_img_width)
+        # exit()
+        # print(global_line)
+        # exit()
+        grid_lines_connection = build_connection(
+            grid_lines,
             norm1,
-            similar_threshold=-1,
-            threshold=global_threshold,
-            duplicate_threshold=global_threshold if remove_duplicate else -1,
-        )
-        # print(group_connection)
-        # for i, group in enumerate(group_connection):
-        #     color = color_map(i)
-        #     ori_img = draw_rect(ori_img, group, color=color, width=5)
-        plot_images(ori_img, 800)
-        # line graph
-        img = np.full(ori_img.shape, 255, np.uint8)
-        img = draw_line(img, global_line, endpoint=True, endpoint_thickness=1)
-        plot_images(img, 800)
-        print("global connection map")
-        img_bk = img.copy()
-        for i, group in enumerate(global_connection):
-            color = color_map(i % 3)
-            img_bk = draw_rect(img_bk, group, color=color, width=6)
-        plot_images(img_bk, 800)
-        print("group connection map")
-        for i, group in enumerate(group_connection):
-            color = color_map(i)
-            img = draw_rect(img, group, color=color, width=6)
-        plot_images(img, 800)
-        # exit()
-        img = np.full(ori_img.shape, 255, np.uint8)
-        img = draw_line(img, global_line, endpoint=True, endpoint_thickness=4, color=(0, 0, 0))
-
-        fimg = create_grid(
-            image_set,
-            nrow=num_column,
-            padding=1,
-            pad_value=127,
+            similar_threshold=0,
+            threshold=0.01,
+            duplicate_threshold=1e-5,
         )
 
-        plot_images(fimg, 800)
-        # process_images = []
-        # for i, group in enumerate(group_connection):
-        #     img_part = img.copy()
-        #     img_part = draw_rect(img_part, group, color=(192, 91, 22), width=5)
-        #     process_images.append(img_part)
-        # plot_images(process_images[0:3], img_width=800)
-        # exit()
-        current_shape = ori_img.shape
-        for group in group_connection:
-            for i, point in enumerate(group):
-                x = point[0] * current_shape[1] - shift_x
-                y = point[1] * current_shape[0] - shift_y
-                group[i] = [x, y]
-        for i, group in enumerate(group_connection):
-            color = color_map(i)
-            input_img = draw_rect(input_img, group, color=color, width=7, scale=False)
-        plot_images(input_img, 800)
-        return group_connection, input_img
+        def draw_connection(img, groups, grid, scaled):
+            img = img.copy()
+            for i, group in enumerate(groups):
+                group = np.array(group)
+                if not scaled:
+                    group *= cropped_slice_size
+                    group[:, 0] /= img.shape[1]
+                    group[:, 1] /= img.shape[0]
+                color = color_map(i)
+                img = draw_rect(img, group, color=color, width=5)
+            plot_images(
+                (
+                    create_grid(
+                        img,
+                        window_size=cropped_slice_size,
+                        padding=1,
+                        pad_value=127,
+                    )
+                    if grid
+                    else img
+                ),
+                debug_img_width,
+            )
+            return img
+
+        print("global connection figure")
+        draw_connection(image_copy, grid_lines_connection, True, False)
+        connection = build_connection(
+            grid_lines_connection,
+            norm1,
+            similar_threshold=0,
+            threshold=local_threshold,
+            duplicate_threshold=local_threshold if remove_duplicate else -1,
+        )
+        print("local connection figure")
+        draw_connection(image_copy, connection, True, False)
+        global_connection = []
+        for group in connection:
+            group = np.array(group) * cropped_slice_size
+            group[:, 0] /= draw_img.shape[1]
+            group[:, 1] /= draw_img.shape[0]
+            global_connection.append(group.tolist())
+        draw_img = draw_connection(draw_img, global_connection, False, True)
+        torch.cuda.empty_cache()
+        return global_connection, draw_img
 
 
 def calculate_optimal_shift(slice_size, ori_img, boundary, debug):
     with HiddenPrints(disable=debug), HiddenPlots(disable=debug):
-        # gray_scale = ori_img[]
         gray_scale = cv2.cvtColor(ori_img, cv2.COLOR_BGR2GRAY) / 255
         mask = ori_img[:, :, 3] < 255
         gray_scale[mask] = 1
@@ -495,7 +508,6 @@ def calculate_optimal_shift(slice_size, ori_img, boundary, debug):
             plot_images(ax, 600)
             ax.figure.clf()
         max_score = -math.inf
-        start_score = 0
         max_i = 0
         record = {}
         for i in range(slice_size):
@@ -507,16 +519,7 @@ def calculate_optimal_shift(slice_size, ori_img, boundary, debug):
             if score > max_score:
                 max_score = score
                 max_i = i
-            if i == 0:
-                start_score = score
         optimal_shift_y = max_i
-        # print("start_score of y:", start_score)
-        # plot_images(ax := sns.barplot(record[0]), 600)
-        # ax.figure.clf()
-        # print("max_score of y:", max_score)
-        # plot_images(ax := sns.barplot(record[max_i]), 600)
-        # ax.figure.clf()
-        # print(max_i)
 
         max_score = -math.inf
         max_i = 0
@@ -552,7 +555,7 @@ def calculate_optimal_shift(slice_size, ori_img, boundary, debug):
             ax.figure.clf()
         if debug:
             print("original image")
-            preview_dataset = TestWindowed(ori_img, 1, slice_size)
+            preview_dataset = TestWindowed(ori_img, 0, slice_size)
             plot_images(
                 create_grid(
                     [x[0] for x in preview_dataset],
@@ -564,7 +567,7 @@ def calculate_optimal_shift(slice_size, ori_img, boundary, debug):
             )
             print("shifted image")
             preview_dataset = TestWindowed(
-                shift(ori_img, (optimal_shift_x, optimal_shift_y), fill=127), 1, slice_size
+                shift(ori_img, (optimal_shift_x, optimal_shift_y), fill=127), 0, slice_size
             )
             plot_images(
                 create_grid(
@@ -583,28 +586,48 @@ if __name__ == "__main__":
     img_names = (
         "218 82 850 1807 260 50001 50038 50119 50207 50799 42852 33748 8203 7735 7578 6826 6640 5841"
     ).split()
-    # img_names = ("24023 24167 24348").split()[-2:]
-    # img_names = ("24023").split()
     path = "dataset_fullimg_mask/images/circuit10188.png"
     path = "dataset_fullimg_mask/images/circuit16176.png"
     path = "dataset_fullimg_mask/images/circuit" + img_names[0] + ".png"
     path = "dataset_fullimg_mask/images/circuit24348.png"
-    path = "test_images/circuit50038.png"
-    path = "dataset_fullimg_mask/images/circuit56081.png"
     path = "dataset_fullimg_mask/images/circuit3244.png"
-    img_name = [img_names[-6]]
-    group_connection, img = analyze_connection(
-        cv2.imread(path, cv2.IMREAD_UNCHANGED),
-        min_line_length=0.005,
-        local_threshold=0.09,
-        global_threshold=0.015,
-        remove_duplicate=True,
-        optimal_shift=True,
-        boundary=3,
-        strict_match=False,
-        strict_match_threshold=0.01,
-        debug=True,
-        debug_shift_optimization=True,
-        debug_cell=[-1, -1],
+    path = "dataset_fullimg_mask/images/circuit56081.png"
+    path = "test_images/circuit50038.png"
+    path = "real_data/images/000002.jpg"
+    test_list = list(
+        path_like_sort([x.name for x in Path(config.TEST_DATASET_PATH + "/images").iterdir()])
     )
-    plot_images(img, 800)
+    # test_list = ["000223.jpg"]
+    if not config.REAL_DATA:
+        data_config = config.DatasetConfig.CC
+    else:
+        data_config = config.DatasetConfig.REAL
+
+    img_name = Path(config.TEST_DATASET_PATH + "/images/" + test_list[7])
+    img = cv2.imread(img_name)
+    label_name = img_name.name.replace(".jpg", ".txt")
+    img, processed_img = load_test_data(img, label_name, config.TEST_DATASET_PATH, data_config)
+    if max(img.shape) > 1000:
+        img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
+        processed_img = cv2.resize(processed_img, (0, 0), fx=0.5, fy=0.5)
+    group_connection, result_img = analyze_connection(
+        data_config,
+        processed_img,
+        img,
+        min_line_length=1e-2,
+        interval=5,
+        local_threshold=0.2,
+        remove_duplicate=False,
+        exclude_white_points=False,
+        optimal_shift=False,
+        boundary=3,
+        strict_match=True,
+        strict_match_threshold=0.15,
+        debug=True,
+        debug_shift_optimization=False,
+        debug_cell=[-1, -1],
+        debug_img_width=600,
+    )
+    # plot_images(result_img, 600)
+
+# %%

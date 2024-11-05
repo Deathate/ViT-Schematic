@@ -16,7 +16,7 @@ def build_connection(data, distance, similar_threshold, threshold, duplicate_thr
         unique_segments = []
         for i in range(len(segment)):
             for j in range(i + 1, len(segment)):
-                if distance(segment[i], segment[j]) < threshold:
+                if distance(segment[i], segment[j]) <= threshold:
                     break
             else:
                 unique_segments.append(segment[i])
@@ -40,7 +40,8 @@ def build_connection(data, distance, similar_threshold, threshold, duplicate_thr
             for j in range(i + 1, n):
                 # 比較線段 i 和線段 j 之間的所有端點組合
                 for point1, point2 in itertools.product(unique_segments[i], unique_segments[j]):
-                    if distance(point1, point2) < threshold:
+                    if distance(point1, point2) <= threshold:
+                        # print(f"merge {unique_segments[i]} and {unique_segments[j]}")
                         rootX = find(parent, i)
                         rootY = find(parent, j)
                         parent[rootY] = rootX
@@ -66,7 +67,7 @@ def build_connection(data, distance, similar_threshold, threshold, duplicate_thr
         merged_points = points[:]
         for i in range(len(merged_points)):
             for j in range(i + 1, len(merged_points)):
-                if distance(merged_points[i], merged_points[j]) < threshold:
+                if distance(merged_points[i], merged_points[j]) <= threshold:
                     group1 = points_group[tuple(merged_points[i])]
                     group2 = points_group[tuple(merged_points[j])]
                     if group1.intersection(group2):
@@ -95,6 +96,41 @@ def build_connection(data, distance, similar_threshold, threshold, duplicate_thr
         if len(unique_points) > 0:
             group_connection.append(unique_points)
     return group_connection
+
+
+def build_connection_v2(data, distance, threshold):
+
+    # 用來尋找每個線段所屬的組的根節點
+    def find(parent, i):
+        return i if parent[i] == i else find(parent, parent[i])
+
+    # 根據兩條線段端點的距離將它們分組
+    def group_segments(segments, threshold=0.2):
+        n = len(segments)
+
+        parent = list(range(n))
+
+        for i in range(n):
+            for j in range(i + 1, n):
+                # 比較線段 i 和線段 j 之間的所有端點組合
+                for point1, point2 in itertools.product(segments[i], segments[j]):
+                    if distance(point1, point2) <= threshold:
+                        rootX = find(parent, i)
+                        rootY = find(parent, j)
+                        parent[rootY] = rootX
+                        break
+        # 根據 parent 結構將線段分組
+        groups = [[] for _ in range(n)]
+        for i in range(n):
+            root = find(parent, i)
+            groups[root].append(segments[i])
+        groups = [group for group in groups if len(group) > 0]
+
+        return groups
+
+    grouped_segments = group_segments(data, threshold)  # 閾值根據需求調整
+
+    return grouped_segments
 
 
 if __name__ == "__main__":
@@ -132,6 +168,10 @@ if __name__ == "__main__":
         [[0.1567024141550064, 0.5360572338104248], [0.2142857164144516, 0.5360572338104248]],
         [[0.14573770761489868, 0.5157356262207031], [0.1428571492433548, 0.6221328973770142]],
     ]
+    data = [
+        [[0.80000001, 0.55000003], [1.0, 0.53749996]],
+        [[0.81874999, 0.52499998], [0.81874999, 1.0]],
+    ]
     # data = [
     #     [[0.01, 0.01], [0.74, 0.53]],
     #     [[0.0, 0.001], [0.0, 0.02]],
@@ -153,4 +193,4 @@ if __name__ == "__main__":
     # print(group_connection)
     # print(len(group_connection))
     plot_images(img, img_width=300)
-    pprint(group_connection)
+    print(group_connection)

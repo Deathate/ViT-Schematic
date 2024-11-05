@@ -41,6 +41,8 @@ def set_seed(seed, deterministic):
     torch.backends.cudnn.enabled = False
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
+    global rng
+    rng = np.random.default_rng(seed)
 
 
 class DataCell(typing.NamedTuple):
@@ -51,10 +53,18 @@ class DataCell(typing.NamedTuple):
 
 class Datasetbehaviour:
     def __init__(
-        self, size, creater: abc.Callable, always_reset=False, log2console=True, *args, **kwargs
+        self,
+        size,
+        creater: abc.Callable,
+        setup: abc.Callable = None,
+        always_reset=False,
+        log2console=True,
+        *args,
+        **kwargs,
     ):
         self.size = size
-        self.creater = lambda: creater(*args, **kwargs)
+        self.creater = lambda i: creater(i, *args, **kwargs)
+        self.setup = lambda: setup(*args, **kwargs) if setup else None
         self.reset = Datasetbehaviour.RESET
         self.log2console = log2console
         if not always_reset:
@@ -62,15 +72,12 @@ class Datasetbehaviour:
             source = re.sub(r"#.+\n", "", source)
             key = source + str(args) + str(kwargs) + str(size)
             filepath = self.__get_filepath(key)
-            self.print("** [Create dataset]")
-            self.print("[Identify file path]")
-            self.print(textwrap.fill(str(filepath), 70, initial_indent=" " * 2))
             self.filepath = str(filepath)
         self.__dataset = None
         self.always_reset = always_reset
 
-    def creater_wrapper(self):
-        x = self.creater()
+    def creater_wrapper(self, i):
+        x = self.creater(i)
         if x is None:
             return None
         elif len(x) == 2:
@@ -93,19 +100,20 @@ class Datasetbehaviour:
         self.print("- New:", Datasetbehaviour.RESET or self.always_reset)
         self.print("- Multiple Processes:", Datasetbehaviour.MP)
         if not self.always_reset and Path(self.filepath).exists() and (not Datasetbehaviour.RESET):
-            self.print("** [cache found]")
-            self.print(textwrap.fill(self.filepath, 70, initial_indent=" " * 4))
+            self.print("[Identify file path]")
+            self.print(str(self.filepath))
+            self.print("[Loading from cache]")
             self.__dataset = pickle.load(open(self.filepath, "rb"))
         else:
             if not Datasetbehaviour.MP:
                 dataset = []
-                for _ in tqdm(range(self.size), disable=not self.log2console):
-                    dataset.append(self.creater_wrapper())
+                for i in tqdm(range(self.size), disable=not self.log2console):
+                    dataset.append(self.creater_wrapper(i))
             else:
                 dataset = p_tqdm.p_umap(
-                    lambda _: self.creater_wrapper(),
+                    lambda i: self.creater_wrapper(i),
                     range(self.size),
-                    num_cpus=os.cpu_count() - 4,
+                    num_cpus=os.cpu_count() - 8,
                 )
             self.__dataset = np.array([x for x in dataset if x is not None], dtype=object)
             if not self.always_reset:
@@ -171,11 +179,19 @@ class Datasetbehaviour:
         Datasetbehaviour.RESET = False
 
     def view(self):
-        pprint(self[0])
+        self.print(self[0])
 
     def print(self, *args):
         if self.log2console:
-            print(*args)
+            default_print(*args)
+
+    def clear(self):
+        self.__dataset = None
+        if self.setup:
+            self.setup()
+
+    def mute(self):
+        self.log2console = False
 
 
 Datasetbehaviour.reset()
@@ -197,69 +213,61 @@ class MetaData:
 
 
 class Model:
+
     def __init__(
         self,
         data: Datasetbehaviour = None,
+        eval_data: Datasetbehaviour = None,
         batch_size=64,
         xtransform=None,
         ytransform=None,
         validation_split=0.1,
         shuffle=False,
         amp=True,
+        cudnn_benchmark=False,
         cudalize=True,
         use_cache=True,
         memory_fraction=1,
         eval=False,
         log2console=True,
+        log_freq=1,
         seed=42,
     ):
         if memory_fraction < 1:
             torch.cuda.set_per_process_memory_fraction(memory_fraction)
         self.name = type(data).__name__
+        self.batch_size = batch_size
         self.xtransform = xtransform
         self.ytransform = ytransform
         if self.xtransform is None:
             self.xtransform = lambda x: torch.tensor(x).float().cuda()
         if self.ytransform is None:
             self.ytransform = lambda x: torch.tensor(x).float().cuda()
-        # torch.set_default_device('cuda')
+
         self.cudalize = cudalize
         self.data = data
+        self.eval_data = eval_data
+        self.validation_split = validation_split
+        self.shuffle = shuffle
+        self.use_cache = use_cache
+        self.eval = eval
+        self.seed = seed
         self.log2console = log2console
-        if not eval and data:
-            self.dataset = self.preprocessing(data, use_cache, cudalize)
-            generator = torch.Generator().manual_seed(seed)
-            self.train_dataset, self.test_dataset = torch.utils.data.random_split(
-                self.dataset,
-                [tn := int(len(self.dataset) * (1 - validation_split)), len(self.dataset) - tn],
-                generator=generator,
-            )
-            self.train_loader = DataLoader(
-                dataset=self.train_dataset,
-                batch_size=batch_size,
-                shuffle=shuffle,
-                # pin_memory=True,
-                # num_workers=os.cpu_count(),
-                # persistent_workers=True,
-            )
-            self.test_loader = DataLoader(
-                dataset=self.test_dataset,
-                batch_size=batch_size,
-                # pin_memory=True,
-                # num_workers=os.cpu_count(),
-                # persistent_workers=True,
-            )
+        self.log_freq = log_freq
         self.model = None
         self.model_id = None
 
         self.amp = amp
+        if cudnn_benchmark:
+            torch.backends.cudnn.enabled = True
+            torch.backends.cudnn.benchmark = True
         self.writer = None
         torch.set_float32_matmul_precision("high")
         self.meta: MetaData = None
 
     def print(self, *args):
         if self.log2console:
-            print(*args)
+            default_print(*args)
 
     def tensorboard_setting(self):
         if self.writer:
@@ -317,7 +325,8 @@ class Model:
             for r in tqdm(result, disable=not self.log2console):
                 r[1] = cudalization(r[1])
                 r[2] = cudalization(r[2])
-        self.print("--- [finish preprocessing] ---\n")
+
+        self.print("[data preprocessing finished]\n")
         return result
 
     def fit(
@@ -341,7 +350,44 @@ class Model:
         keep_optimizer=True,
         config=None,
         upload=False,
+        flush_cache_after_step=0,
     ):
+        self.ep = 1
+        self.total_time = 0
+
+        def create_data_loader(data, mode):
+            loader = DataLoader(
+                dataset=data,
+                batch_size=self.batch_size,
+            )
+            if mode == "train":
+                self.train_dataset, self.train_loader = data, loader
+            else:
+                self.test_dataset, self.test_loader = data, loader
+
+        if flush_cache_after_step != 0 and not self.data.always_reset:
+            print(
+                "[#FF0000]UserWarning: flush_cache_after_step is enabled but always_reset of dataset is False, this make no sense"
+            )
+            assert False
+        if not self.eval and self.data is not None:
+            self.data = self.preprocessing(self.data, self.use_cache, self.cudalize)
+            if self.eval_data is None:
+                if self.shuffle:
+                    rng.shuffle(self.data)
+                split_point = int((1 - self.validation_split) * len(self.data))
+                self.data, self.eval_data = (
+                    self.data[:split_point],
+                    self.data[split_point:],
+                )
+                for i in range(len(self.eval_data)):
+                    self.eval_data[i][0] = i
+            else:
+                self.eval_data = self.preprocessing(self.eval_data, self.use_cache, self.cudalize)
+
+            create_data_loader(self.data, "train")
+            create_data_loader(self.eval_data, "val")
+
         now = datetime.datetime.now()
         self.log_dir = Path(f"runs/{self.name}/" + now.strftime("%m%d_%H-%M-%S") + "/")
         self.run = None
@@ -369,7 +415,7 @@ class Model:
         backprop_freq = int(backprop_freq)
         previous_epoch = 0
         list_of_files = glob.glob(str(self.log_dir.parent) + "/*")
-        scaler = torch.cuda.amp.GradScaler()
+        scaler = torch.amp.GradScaler("cuda")
         if pretrained_path == "latest":
             if len(list_of_files) == 0:
                 pretrained_path = ""
@@ -381,7 +427,7 @@ class Model:
                     pretrained_path = ""
         if pretrained_path:
             self.print(f'** [Pretrained model loaded] - "{pretrained_path}"')
-            checkpoint = torch.load(pretrained_path)
+            checkpoint = torch.load(pretrained_path, weights_only=False)
             if isinstance(checkpoint, OrderedDict):
                 model.load_state_dict(checkpoint, strict=True)
                 model = self.parallel(model, device_ids)
@@ -440,7 +486,11 @@ class Model:
 
             def create_meta(seq, ep, mode) -> MetaData:
                 return MetaData(
-                    data=[DataCell(*self.data[s]) for s in seq],
+                    data=(
+                        [DataCell(*self.data[s]) for s in seq]
+                        if mode == "train"
+                        else [DataCell(*self.eval_data[s]) for s in seq]
+                    ),
                     model=self.model if len(device_ids) == 1 else self.model.module,
                     epoch=ep,
                     mode=mode,
@@ -454,7 +504,10 @@ class Model:
                     ncols=0,
                     disable=not self.log2console,
                 ) as pbar:
-                    pbar.set_description(f"Epoch {ep+1}/{end} ({max_epochs})")
+                    if ep % self.log_freq != 0:
+                        pbar.disable = True
+
+                    pbar.set_description(f"Epoch {ep}/{end} ({max_epochs})")
                     train_loss = []
                     pbar.set_postfix({"TLoss": "---", "VLoss": "---"})
                     accs = defaultdict(list)
@@ -502,6 +555,13 @@ class Model:
                                 pbar.update(1)
                         if training_epoch_end:
                             training_epoch_end()
+                        if flush_cache_after_step != 0 and ep % flush_cache_after_step == 0:
+                            self.data.clear()
+                            # self.data.mute()
+                            # self.log2console = False
+                            create_data_loader(self.data, "train")
+                            # self.log2console = True
+
                     except Exception as e:
                         self.print("!!!-------- Error captured --------!!!")
                         try:
@@ -555,7 +615,6 @@ class Model:
                         best_acc_val[acc] = max(value, best_acc_val[acc])
                     best_train_loss = min(mean_train_loss, best_train_loss)
                     best_val_loss = min(mean_val_loss, best_val_loss)
-
                     self.writer.add_scalar("Loss/train", mean_train_loss, ep + 1)
                     self.writer.add_scalar("Loss/val", mean_val_loss, ep + 1)
                     for acc in accs:
@@ -574,7 +633,7 @@ class Model:
                     if self.run is not None:
                         self.run.log(
                             {
-                                "epoch": ep + 1,
+                                # "epoch": ep + 1,
                                 "Loss/train": mean_train_loss,
                                 "Loss/val": mean_val_loss,
                                 "Loss/best/train": best_train_loss,
@@ -590,10 +649,7 @@ class Model:
                             step=ep + 1,
                         )
                     pbar.set_postfix(
-                        {
-                            "TLoss": f"{mean_train_loss:.3E}",
-                            "VLoss": f"{mean_val_loss:.3E}",
-                        }
+                        {"TLoss": f"{mean_train_loss:.2E}", "VLoss": f"{mean_val_loss:.2E}", **accs}
                     )
                     if mean_val_loss == best_val_loss:
                         saved_path = Path(self.log_dir) / "best.pth"
@@ -708,6 +764,13 @@ class Model:
         x = next(iter(loader))[1]
         y = next(iter(loader))[2]
         prediction = self.predict(x, y)
+        # for i in testset:
+        #     plot_images(i[1])
+        # plot_images(
+        #     draw_line(np.array(transforms.ToPILImage()(testset[2][1])), prediction[2].cpu().numpy())
+        # )
+        # exit()
+
         if isinstance(prediction, tuple):
             prediction = prediction[0]
         if verbose:
@@ -783,15 +846,13 @@ class Model:
         return self.dataset[size]
 
     def view(self):
-        pprint(self[0])
+        print(self[0])
 
     def gc(self):
         collected = gc.collect()
         self.print(f"Garbage collector: collected {collected} objects.")
         torch.cuda.empty_cache()
-        self.ep = 0
         self.interrupt = False
-        self.total_time = 0
 
     def device(self):
         return next(self.model.parameters()).device
