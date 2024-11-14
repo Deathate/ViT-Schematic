@@ -12,4 +12,4 @@ moco_test/
 tmp/
 wandb/
 cache/
-weights/
+weights

@@ -3,6 +3,7 @@ from shapely.geometry import LineString, box
 
 from main_line_robust_config import *
 from utility import *
+
 class_label_cc = dict(
     enumerate(
         [
@@ -23,7 +24,7 @@ class_label_cc = dict(
             "not",
             "func",
             "op",
-            "tgate"
+            "tgate",
         ]
     )
 )
@@ -78,9 +79,13 @@ def get_box(img, path, config: DatasetConfig):
             elif class_label_real[cls] in ["node", "crossing"]:
                 pass
             elif class_label_real[cls] in ["pmos", "nmos"]:
-                mask[y_min:y_max, x_min:x_max] = 100
+                # mask[y_min:y_max, x_min:x_max] = 100
+                mask[y_min : int(y_min + (y_max - y_min) * 0.4), x_min:x_max] = 200
+                mask[int(y_max - (y_max - y_min) * 0.4) : y_max, x_min:x_max] = 200
+
             else:
-                mask[y_min:y_max, x_min:x_max] = 200
+                # mask[y_min:y_max, x_min:x_max] = 200
+                mask[y_min:y_max, x_min:x_max] = 100
         else:
             mask[y_min:y_max, x_min:x_max] = 100
     return mask
@@ -150,7 +155,7 @@ def load_test_data(img, label_name, dir, config):
 if __name__ == "__main__":
     # img_name = list(Path("real_data/train/images").iterdir())[0].name
     # img, processed_img, data = load_data(img_name, "real_data/train")
-    img, processed_img, data = load_data("000223.jpg", "real_data/train")
+    img, processed_img, data = load_data("000223.jpg", "real_data/train", DatasetConfig.REAL)
     plot_images(img, img_width=800)
     plot_images(processed_img, img_width=800)
     # for i in range(5):

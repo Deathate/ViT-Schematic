@@ -248,7 +248,7 @@ colors = get_rgb(["Acanthurus_olivaceus", "Signac", "Antique"])
 colors = [
     c
     for i, c in enumerate(colors)
-    if i in [0, 1, 2, 3, 4, 7, 8, 10, 12, 13, 15, 17, 18, 19, 20, 21, 22, 23, 25, 28, 29, 30, 31]
+    if i in [0, 1, 3, 4, 7, 8, 10, 12, 13, 15, 17, 18, 19, 20, 21, 22, 23, 25, 28, 29, 30, 31]
 ]
 color_map.colors = colors
 
@@ -662,7 +662,7 @@ def draw_line(
     return img
 
 
-def slice_image_into_windows(img, window_size, stride=0):
+def slice_image_into_windows(img, window_size, stride=0, buffer=None):
     h, w, c = img.shape
     p = []
     i = 0
@@ -670,6 +670,8 @@ def slice_image_into_windows(img, window_size, stride=0):
         j = 0
         while j + window_size <= w:
             s = img[i : i + window_size, j : j + window_size]
+            if buffer is not None:
+                buffer.append((i, j))
             p.append(s)
             j += window_size + stride
         i += window_size + stride
@@ -682,7 +684,7 @@ def slice_image_into_windows(img, window_size, stride=0):
 # exit()
 
 
-def create_grid(images, window_size=100, **args):
+def create_grid(images, window_size=100, padding=2, pad_value=0, **args):
     p = []
     if not isinstance(images, list):
         args["nrow"] = images.shape[1] // window_size
@@ -692,6 +694,8 @@ def create_grid(images, window_size=100, **args):
         s = s.permute(2, 0, 1)
         p.append(s)
     p = torch.stack(p)
+    args["padding"] = padding
+    args["pad_value"] = pad_value
     fimg = make_grid(p, **args)
     fimg = fimg.permute(1, 2, 0).numpy()
     return fimg

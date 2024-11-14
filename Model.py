@@ -760,6 +760,9 @@ class Model:
         self.model.eval()
         if not preprocessing:
             testset = self.preprocessing(testset, True, True)
+        # img = np.array(transforms.ToPILImage()(testset[0][1].cpu()))
+        # plot_images(img, img_width=400)
+        # exit()
         loader = DataLoader(dataset=testset, batch_size=len(testset))
         x = next(iter(loader))[1]
         y = next(iter(loader))[2]

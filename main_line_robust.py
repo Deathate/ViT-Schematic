@@ -8,13 +8,24 @@ from Model import *
 from slice import *
 
 
+def image_preprocess(img):
+    if max(img.shape) > 1000:
+        img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
+    pad = 20
+    half_pad = pad // 2
+    img = resize_with_padding(img, pad, pad, 255)
+    img = shift(img, (half_pad, half_pad), fill=255)
+    return img, pad, half_pad
+
+
 class FormalDatasetWindowedLinePair(Datasetbehaviour):
     def __init__(self, size, dataset_source, pick, full, direction):
-
         cache_dir = Path("cache")
         cache_path = cache_dir / Path(dataset_source) / str(size)
         self.cache_path = cache_path
         shutil.rmtree(cache_path, ignore_errors=True)
+        shutil.rmtree("tmp", ignore_errors=True)
+        Path("tmp").mkdir(parents=True, exist_ok=True)
         if not cache_path.exists():
             cache_path.mkdir(parents=True, exist_ok=True)
             self.img_folder = Path(dataset_source) / Path("images")
@@ -22,10 +33,13 @@ class FormalDatasetWindowedLinePair(Datasetbehaviour):
             self.img_list = path_like_sort(self.img_list)
             if size > 0:
                 self.img_list = self.img_list[:size]
-            for i, img_path in enumerate(tqdm(self.img_list)):
-                _, img, data = load_data(img_path.name, dataset_source, config.DatasetConfig.REAL)
-                if max(img.shape) > 1000:
-                    img = cv2.resize(img, (0, 0), fx=0.5, fy=0.5)
+            i = 0
+            for img_path in tqdm(self.img_list):
+                _, img, data = load_data(
+                    img_path.name,
+                    dataset_source,
+                    config.DatasetConfig.REAL if config.REAL_DATA else config.DatasetConfig.CC,
+                )
                 data = np.array(data)
                 for d in data:
                     angle = self.calculate_line_angle(*d[0], *d[1])
@@ -36,19 +50,35 @@ class FormalDatasetWindowedLinePair(Datasetbehaviour):
                             d[0, 1] = d[1, 1] = (d[0, 1] + d[1, 1]) / 2
                         else:
                             d[0, 0] = d[1, 0] = (d[0, 0] + d[1, 0]) / 2
-                pad = 20
-                half_pad = pad // 2
-                img = resize_with_padding(img, pad, pad, 255)
-                img = shift(img, (half_pad, half_pad), fill=255)
+                img, pad, half_pad = image_preprocess(img)
                 data[:, :, 0] *= (img.shape[1] - pad) / img.shape[1]
                 data[:, :, 1] *= (img.shape[0] - pad) / img.shape[0]
                 data[:, :, 0] += half_pad / img.shape[1]
                 data[:, :, 1] += half_pad / img.shape[0]
-                # plot_images(draw_line(img, data), img_width=600)
-                # exit()
-                with open(cache_path / str(i), "wb") as f:
-                    pickle.dump((img, data), f)
-
+                # plot_images(draw_line(img, data), img_width=400)
+                buffer = []
+                slice_image_into_windows(img, 50, -40, buffer=buffer)
+                a_data = [get_slice(img, data, *i, 50, 50, False) for i in buffer]
+                a_data = list(
+                    filter(
+                        lambda x: x[0].shape[0] == 50
+                        and x[0].shape[1] == 50
+                        and x[0].sum() > 0
+                        and x[0].mean() < 252,
+                        a_data,
+                    )
+                )
+                c = [draw_line(i[0], i[1]) for i in a_data]
+                cv2.imwrite(f"tmp/{i}.png", create_grid(c, nrow=12))
+                # plot_images(create_grid([i[0] for i in a_data], nrow=12), img_width=400)
+                for img, data in a_data:
+                    with open(cache_path / str(i), "wb") as f:
+                        pickle.dump((img, data), f)
+                        i += 1
+                # if config.ZOOM:
+                #     with open(cache_path / str(i), "wb") as f:
+                #         pickle.dump((cv2.resize(img, (0, 0), fx=0.5, fy=0.5), data), f)
+                #         i += 1
         size = len(list(cache_path.glob("*")))
         self.pick = pick
         self.direction = direction
@@ -221,10 +251,6 @@ class FormalDatasetWindowedLinePair(Datasetbehaviour):
                 pass
         elif self.direction == 12:
             if v % 12 == 0:
-                img, data = np.flip(img, axis=0), self.mirror_lines_x(data)
-            elif v % 12 == 1:
-                img, data = np.flip(img, axis=1), self.mirror_lines_y(data)
-            elif v % 12 == 2:  # 90
                 img, data = np.rot90(img), self.rotate_lines(data, 90)
             elif v % 12 == 3:
                 img, data = self.augment(img, data, 2)
@@ -253,59 +279,45 @@ class FormalDatasetWindowedLinePair(Datasetbehaviour):
                 img, data = self.augment(img, data, 1)
             elif v % 12 == 11:  # 360
                 pass
+        elif self.direction == 4:
+            if v % 4 == 0:
+                img, data = np.rot90(img), self.rotate_lines(data, 90)
+            elif v % 4 == 1:
+                img, data = self.augment(img, data, 0)
+                img, data = self.augment(img, data, 0)
+            elif v % 4 == 2:
+                img, data = self.augment(img, data, 0)
+                img, data = self.augment(img, data, 0)
+                img, data = self.augment(img, data, 0)
+            elif v % 4 == 3:
+                pass
         elif self.direction == 1:
             pass
         return img, data
 
     def __create(self, i):
         current = i // self.pick // self.direction
-        new = False
         if current > len(self.data_list) - 1:
             with open(self.cache_path / str(current), "rb") as f:
                 img, data = pickle.load(f)
                 self.data_list.append((img, data))
-                new = True
         img, data = self.data_list[current]
-
         if self.full:
-            return img, data, None
+            img = cv2.resize(img, (224, 224))
+            img, line_segments = self.augment(img.copy(), data.copy(), i)
+            # if i < 10:
+            #     plot_images(draw_line(img, line_segments), img_width=400)
+            # else:
+            #     exit()
+            return img, line_segments, None
         else:
             try:
                 if i % self.direction == 0:
-                    if i == 0:
-                        shutil.rmtree("tmp", ignore_errors=True)
-                        Path("tmp").mkdir(parents=True, exist_ok=True)
-                    while True:
-                        self.cropped_img, self.line_segments = get_random_slice(
-                            img, data, config.IMAGE_SIZE, config.IMAGE_SIZE, debug=False
-                        )
-                        if self.cropped_img[:, :, :3].mean() != 255:
-                            # cv2.imwrite(
-                            #     f"tmp/{i}.png",
-                            #     self.cropped_img,
-                            # )
-                            break
+                    self.cropped_img, self.line_segments = img, data
                 cropped_img, line_segments = self.augment(
                     self.cropped_img.copy(), self.line_segments.copy(), i
                 )
-                # print(cropped_img.shape)
-                # plot_images(draw_line(cropped_img, line_segments), img_width=400)
-                # exit()
-                # if i == 0:
-                #     shutil.rmtree("tmp", ignore_errors=True)
-                #     Path("tmp").mkdir(parents=True, exist_ok=True)
-                #     plot_images(img, img_width=400)
-                # if i < 20:
-                #     # plot_images(cropped_img, img_width=400)
-                #     cv2.imwrite(
-                #         f"tmp/{i}.png",
-                #         cv2.resize(draw_line(cropped_img, line_segments), (400, 400)),
-                #     )
-                # else:
-                #     exit()
             except ValueError as e:
-                # print("Error in get_random_slice")
-                # print(f"img: {img.shape}")
                 print(e)
                 return None
 
@@ -342,8 +354,9 @@ def xtransform(x):
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
         ]
     )(x)
-    if config.IMAGE_SIZE == 200:
-        joint = transforms.Resize((224, 224))(joint)
+    # img = np.array(transforms.ToPILImage()(joint))
+    # plot_images(img, img_width=400)
+    # exit()
     return joint
 
 
@@ -449,6 +462,7 @@ def create_model(**kwargs):
     depth = config.DEPTH
     head_num = config.NUM_HEADS
     dim_head = config.EMBED_DIM
+    result_num = config.RESULT_NUM
     parameters = {
         "patch_size": config.PATCH_SIZE,
         "dim": head_num * dim_head,
@@ -493,18 +507,21 @@ def criterion(y_hat, y):
     # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(
     #     model.meta.data[0].output
     # )
-    # img = np.array(transforms.ToPILImage()(model.meta.data[0].output))
-    # plot_images(img, img_width=400)
     # plot_images(draw_line(img, y_hat[0]))
     # exit()
     loss_box = F.smooth_l1_loss(y_hat, y)
+    # for i in range(10):
+    #     img = np.array(transforms.ToPILImage()(model.meta.data[i].output))
+    #     # plot_images(img, img_width=400)
+    #     plot_images(draw_line(img, y_hat[i]), 400)
+    # exit()
     return loss_box
 
 
 def eval_metrics(criterion, y_hat, y):
     loss = criterion(y_hat, y)
     C = torch.cdist(y_hat[:, :, 0], y[:, :, 0]) + torch.cdist(y_hat[:, :, 1], y[:, :, 1])
-    accs = sum([(c.diag() < 0.05).sum() for c in C]) / (C.size(0) * C.size(1))
+    accs = sum([(c.diag() < 0.01).sum() for c in C]) / (C.size(0) * C.size(1))
     return loss, {"acc": accs.item()}
 
 
@@ -518,7 +535,7 @@ def main():
         config.DATASET_SIZE,
         config.DATASET_PATH,
         config.PICK,
-        config.FULL_IMAGE,
+        not config.SMALL_IMAGE,
         direction=config.DIRECTION,
     )
 
@@ -528,7 +545,7 @@ def main():
             config.EVAL_DATASET_SIZE,
             config.EVAL_DATASET_PATH,
             config.PICK,
-            config.FULL_IMAGE,
+            not config.SMALL_IMAGE,
             direction=config.DIRECTION,
         )
     global model
@@ -558,7 +575,8 @@ def main():
         keep_optimizer=config.KEEP_OPTIMIZER,
         config=(
             (get_attr(config) if not config.EVAL else None)
-            if config.DATASET_SIZE >= 200 or config.DATASET_SIZE < 0 and config.PICK != 1
+            if (not config.SMALL_IMAGE and config.DATASET_SIZE == -1)
+            or (config.DATASET_SIZE >= 20 or config.DATASET_SIZE < 0 and config.PICK != 1)
             else None
         ),
         upload=config.UPLOAD,
