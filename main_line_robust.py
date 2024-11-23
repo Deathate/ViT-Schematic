@@ -23,9 +23,12 @@ class FormalDatasetWindowedLinePair(Datasetbehaviour):
         cache_dir = Path("cache")
         cache_path = cache_dir / Path(dataset_source) / str(size)
         self.cache_path = cache_path
-        shutil.rmtree(cache_path, ignore_errors=True)
         shutil.rmtree("tmp", ignore_errors=True)
         Path("tmp").mkdir(parents=True, exist_ok=True)
+        train_source = Path("train_source")
+        shutil.rmtree(str(train_source), ignore_errors=True)
+        train_source.mkdir(parents=True, exist_ok=True)
+        # shutil.rmtree(cache_path, ignore_errors=True)
         if not cache_path.exists():
             cache_path.mkdir(parents=True, exist_ok=True)
             self.img_folder = Path(dataset_source) / Path("images")
@@ -55,7 +58,10 @@ class FormalDatasetWindowedLinePair(Datasetbehaviour):
                 data[:, :, 1] *= (img.shape[0] - pad) / img.shape[0]
                 data[:, :, 0] += half_pad / img.shape[1]
                 data[:, :, 1] += half_pad / img.shape[0]
-                # plot_images(draw_line(img, data), img_width=400)
+                cv2.imwrite(
+                    str(train_source / img_path.name),
+                    draw_line(img, data, endpoint=True, endpoint_thickness=5),
+                )
                 buffer = []
                 slice_image_into_windows(img, 50, -40, buffer=buffer)
                 a_data = [get_slice(img, data, *i, 50, 50, False) for i in buffer]
@@ -68,8 +74,8 @@ class FormalDatasetWindowedLinePair(Datasetbehaviour):
                         a_data,
                     )
                 )
-                c = [draw_line(i[0], i[1]) for i in a_data]
-                cv2.imwrite(f"tmp/{i}.png", create_grid(c, nrow=12))
+                # c = [draw_line(i[0], i[1]) for i in a_data]
+                # cv2.imwrite(f"tmp/{i}.png", create_grid(c, nrow=12))
                 # plot_images(create_grid([i[0] for i in a_data], nrow=12), img_width=400)
                 for img, data in a_data:
                     with open(cache_path / str(i), "wb") as f:
@@ -89,6 +95,7 @@ class FormalDatasetWindowedLinePair(Datasetbehaviour):
         )
         self.data_list = []
         self.full = full
+        self.training_data = []
 
     def calculate_line_angle(self, x1, y1, x2, y2):
         """
@@ -143,6 +150,7 @@ class FormalDatasetWindowedLinePair(Datasetbehaviour):
 
     def rotate_line(self, line, angle_degrees):
         rline = [self.rotate_2d_point(point, angle_degrees) for point in line]
+        return np.array(rline)
         r = 0.1
         rline = LineString(rline).intersection(box(0, 0, 1, 1))
         assert isinstance(rline, LineString)
@@ -299,9 +307,7 @@ class FormalDatasetWindowedLinePair(Datasetbehaviour):
         current = i // self.pick // self.direction
         if current > len(self.data_list) - 1:
             with open(self.cache_path / str(current), "rb") as f:
-                img, data = pickle.load(f)
-                self.data_list.append((img, data))
-        img, data = self.data_list[current]
+                self.img, self.data = pickle.load(f)
         if self.full:
             img = cv2.resize(img, (224, 224))
             img, line_segments = self.augment(img.copy(), data.copy(), i)
@@ -312,11 +318,11 @@ class FormalDatasetWindowedLinePair(Datasetbehaviour):
             return img, line_segments, None
         else:
             try:
-                if i % self.direction == 0:
-                    self.cropped_img, self.line_segments = img, data
-                cropped_img, line_segments = self.augment(
-                    self.cropped_img.copy(), self.line_segments.copy(), i
-                )
+                cropped_img, line_segments = self.augment(self.img.copy(), self.data.copy(), i)
+                self.training_data.append(draw_line(cropped_img, line_segments).copy())
+                if len(self.training_data) == 144:
+                    cv2.imwrite(f"tmp/{i}.png", create_grid(self.training_data, nrow=12, padding=5))
+                    self.training_data = []
             except ValueError as e:
                 print(e)
                 return None
@@ -379,6 +385,7 @@ class ViT_ex(nn.Module):
         dropout=0,
         channels=3,
         style="decoder",
+        output_dim=4,
     ):
         super().__init__()
         self.style = style
@@ -407,7 +414,11 @@ class ViT_ex(nn.Module):
         self.decoder_query = nn.Embedding(result_num, dim)
 
         self.box_head = nn.Sequential(
-            nn.Linear(dim, dim), nn.ReLU(), nn.Linear(dim, dim), nn.ReLU(), nn.Linear(dim, 4)
+            nn.Linear(dim, dim),
+            nn.ReLU(),
+            nn.Linear(dim, dim),
+            nn.ReLU(),
+            nn.Linear(dim, output_dim),
         )
         if config.MODEL_STYLE == "encoder, decoder":
             patch_dim = channels * patch_height * patch_width
@@ -425,8 +436,8 @@ class ViT_ex(nn.Module):
             self.cnn.avgpool = nn.Identity()
             self.cnn.fc = nn.Identity()
             self.cnn_postprocess = nn.Sequential(
-                Rearrange("a (b c d) -> a b c d", b=256, c=14),
-                Rearrange("a b c d -> a (c d) b"),
+                Rearrange("a (b c d) -> a (c d) b", b=256, c=14),
+                nn.Linear(256, dim),
             )
 
     def forward(self, x, y):
@@ -450,7 +461,6 @@ class ViT_ex(nn.Module):
             tgt = repeat(self.decoder_query.weight, "d e -> n d e", n=x.shape[0])
             x = self.decoder(tgt, x)
             x = self.box_head(x)
-            x = x.reshape(x.shape[0], -1, 2, 2)
             return x
 
 
@@ -473,6 +483,7 @@ def create_model(**kwargs):
         "channels": 3,
         "dropout": config.DROPOUT,
         "style": style,
+        "output_dim": 4 + config.CLASS_OUTPUT,
     }
     parameters |= kwargs
     network = ViT_ex(**parameters)
@@ -480,10 +491,10 @@ def create_model(**kwargs):
 
 
 def Hungarian_Order(g1b, g2b):
-    indices = []
-
-    C1 = torch.cdist(g1b[:, :, 0], g2b[:, :, 0]) + torch.cdist(g1b[:, :, 1], g2b[:, :, 1])
-    C2 = torch.cdist(g1b[:, :, 0], g2b[:, :, 1]) + torch.cdist(g1b[:, :, 1], g2b[:, :, 0])
+    x1, y1 = g1b[:, :, [0, 1]], g1b[:, :, [2, 3]]
+    x2, y2 = g2b[:, :, 0], g2b[:, :, 1]
+    C1 = torch.cdist(x1, x2) + torch.cdist(y1, y2)
+    C2 = torch.cdist(x1, y2) + torch.cdist(y1, x2)
     C3 = torch.min(C1, C2).cpu().detach()
 
     indices = [linear_sum_assignment(c)[1] for c in C3]
@@ -491,9 +502,11 @@ def Hungarian_Order(g1b, g2b):
         ind = indices[i]
         g2b[i] = g2b[i][ind]
     # 32 15 2 2
-    C1 = torch.abs(g1b[:, :, 0] - g2b[:, :, 0]) + torch.abs(g1b[:, :, 1] - g2b[:, :, 1])
+    x1, y1 = g1b[:, :, [0, 1]], g1b[:, :, [2, 3]]
+    x2, y2 = g2b[:, :, 0], g2b[:, :, 1]
+    C1 = torch.abs(x1 - x2) + torch.abs(y1 - y2)
     C1 = C1.sum(dim=2)
-    C2 = torch.abs(g1b[:, :, 0] - g2b[:, :, 1]) + torch.abs(g1b[:, :, 1] - g2b[:, :, 0])
+    C2 = torch.abs(x1 - y2) + torch.abs(y1 - x2)
     C2 = C2.sum(dim=2)
     min_index = C1 > C2
     g2b[min_index] = g2b[min_index][:, [1, 0]]
@@ -501,28 +514,57 @@ def Hungarian_Order(g1b, g2b):
 
 def criterion(y_hat, y):
     Hungarian_Order(y_hat, y)
-    # print(y_hat[0])
-    # print(y[0])
     # print(model.meta.data[0])
     # transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])(
     #     model.meta.data[0].output
     # )
     # plot_images(draw_line(img, y_hat[0]))
     # exit()
-    loss_box = F.smooth_l1_loss(y_hat, y)
+    loss_box = F.smooth_l1_loss(y_hat[:, :, [[0, 1], [2, 3]]], y)
+    if config.CLASS_OUTPUT:
+        class_label = 1 - (y < 1e-8).all(dim=2).all(dim=2).float()
+        loss_class = F.binary_cross_entropy_with_logits(y_hat[:, :, 4], class_label)
+        return loss_box + 0.01 * loss_class
+    else:
+        return loss_box
+
     # for i in range(10):
     #     img = np.array(transforms.ToPILImage()(model.meta.data[i].output))
     #     # plot_images(img, img_width=400)
     #     plot_images(draw_line(img, y_hat[i]), 400)
     # exit()
-    return loss_box
+    # return loss_box
+
+
+from torchmetrics.classification import BinaryAccuracy
+
+accuracy_metric = BinaryAccuracy().to("cuda")
 
 
 def eval_metrics(criterion, y_hat, y):
+    accs = {}
     loss = criterion(y_hat, y)
-    C = torch.cdist(y_hat[:, :, 0], y[:, :, 0]) + torch.cdist(y_hat[:, :, 1], y[:, :, 1])
-    accs = sum([(c.diag() < 0.01).sum() for c in C]) / (C.size(0) * C.size(1))
-    return loss, {"acc": accs.item()}
+    class_label = ~(y < 1e-8).all(dim=2).all(dim=2)
+    if config.CLASS_OUTPUT:
+        logits = y_hat[:, :, 4]
+        probabilities = torch.sigmoid(logits)
+        predictions = (probabilities > 0.5).int()
+        classification_accuracy = accuracy_metric(predictions, class_label)
+        accs["c_acc"] = classification_accuracy.item()
+
+    C = torch.cdist(y_hat[:, :, None, [0, 1]], y[:, :, None, 0]) + torch.cdist(
+        y_hat[:, :, None, [2, 3]], y[:, :, None, 1]
+    )
+    C = C.squeeze()
+    C = C[class_label]
+    accs["d_acc"] = 0
+    accs["md_acc"] = 0
+    if C.numel() > 0:
+        distance_accuracy = (C < 0.05).float().mean()
+        accs["d_acc"] = distance_accuracy.item()
+        accs["md_acc"] = -C.mean().item()
+
+    return loss, accs
 
 
 model = None
@@ -554,10 +596,11 @@ def main():
         dataset_eval,
         xtransform=xtransform,
         ytransform=ytransform,
-        amp=True,
+        amp=False,
         # cudnn_benchmark=True,
         batch_size=config.BATCH_SIZE,
         eval=config.EVAL,
+        shuffle=True,
     )
 
     model.fit(
@@ -573,12 +616,7 @@ def main():
         eval_metrics=eval_metrics,
         keep_epoch=config.KEEP_EPOCH,
         keep_optimizer=config.KEEP_OPTIMIZER,
-        config=(
-            (get_attr(config) if not config.EVAL else None)
-            if (not config.SMALL_IMAGE and config.DATASET_SIZE == -1)
-            or (config.DATASET_SIZE >= 20 or config.DATASET_SIZE < 0 and config.PICK != 1)
-            else None
-        ),
+        config=(get_attr(config) if not config.EVAL else None),
         upload=config.UPLOAD,
         flush_cache_after_step=config.FLUSH_CACHE_AFTER_STEP,
     )

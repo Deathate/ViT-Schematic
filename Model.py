@@ -359,6 +359,7 @@ class Model:
             loader = DataLoader(
                 dataset=data,
                 batch_size=self.batch_size,
+                shuffle=self.shuffle if mode == "train" else False,
             )
             if mode == "train":
                 self.train_dataset, self.train_loader = data, loader
@@ -373,8 +374,6 @@ class Model:
         if not self.eval and self.data is not None:
             self.data = self.preprocessing(self.data, self.use_cache, self.cudalize)
             if self.eval_data is None:
-                if self.shuffle:
-                    rng.shuffle(self.data)
                 split_point = int((1 - self.validation_split) * len(self.data))
                 self.data, self.eval_data = (
                     self.data[:split_point],
@@ -427,6 +426,9 @@ class Model:
                     pretrained_path = ""
         if pretrained_path:
             self.print(f'** [Pretrained model loaded] - "{pretrained_path}"')
+            if not Path(pretrained_path).exists():
+                print(f"** [Pretrained model not found] - {pretrained_path}")
+                raise FileNotFoundError
             checkpoint = torch.load(pretrained_path, weights_only=False)
             if isinstance(checkpoint, OrderedDict):
                 model.load_state_dict(checkpoint, strict=True)
@@ -576,8 +578,8 @@ class Model:
                             self.print(error)
                         except:
                             pass
-                        self.print("Removing log directory")
-                        shutil.rmtree(self.log_dir)
+                        # self.print("Removing log directory")
+                        # shutil.rmtree(self.log_dir)
                         raise e
 
                     # calculate validation loss
@@ -613,8 +615,18 @@ class Model:
                         value = np.mean(item)
                         accs_val[acc] = value
                         best_acc_val[acc] = max(value, best_acc_val[acc])
-                    best_train_loss = min(mean_train_loss, best_train_loss)
-                    best_val_loss = min(mean_val_loss, best_val_loss)
+
+                    if mean_train_loss < best_train_loss:
+                        best_train_loss = mean_train_loss
+                        saved_path = Path(self.log_dir) / "best_train.pth"
+                        self.save_model(saved_path, model, device_ids, optimizer, scaler, ep, False)
+                        print(f"Best model saved (train): {saved_path}")
+                    if mean_val_loss < best_val_loss:
+                        best_val_loss = mean_val_loss
+                        saved_path = Path(self.log_dir) / "best_val.pth"
+                        self.save_model(saved_path, model, device_ids, optimizer, scaler, ep, False)
+                        print(f"Best model saved (val): {saved_path}")
+
                     self.writer.add_scalar("Loss/train", mean_train_loss, ep + 1)
                     self.writer.add_scalar("Loss/val", mean_val_loss, ep + 1)
                     for acc in accs:
@@ -631,30 +643,27 @@ class Model:
                         )
                     # self.writer.add_scalar("lr", optimizer.param_groups[0]["lr"], ep + 1)
                     if self.run is not None:
-                        self.run.log(
-                            {
-                                # "epoch": ep + 1,
-                                "Loss/train": mean_train_loss,
-                                "Loss/val": mean_val_loss,
-                                "Loss/best/train": best_train_loss,
-                                "Loss/best/val": best_val_loss,
-                                **{f"Accuracy/train/{acc}": accs[acc] for acc in accs},
-                                **{f"Accuracy/val/{acc}": accs_val[acc] for acc in accs_val},
-                                **{f"Accuracy/best/train/{acc}": best_acc[acc] for acc in best_acc},
-                                **{
-                                    f"Accuracy/best/val/{acc}": best_acc_val[acc]
-                                    for acc in best_acc_val
-                                },
+                        log = {
+                            # "epoch": ep + 1,
+                            "Loss/train": mean_train_loss,
+                            "Loss/val": mean_val_loss,
+                            "Loss/best/train": best_train_loss,
+                            "Loss/best/val": best_val_loss,
+                            **{f"Accuracy/train/{acc}": accs[acc] for acc in accs},
+                            **{f"Accuracy/val/{acc}": accs_val[acc] for acc in accs_val},
+                            **{f"Accuracy/best/train/{acc}": best_acc[acc] for acc in best_acc},
+                            **{
+                                f"Accuracy/best/val/{acc}": best_acc_val[acc]
+                                for acc in best_acc_val
                             },
+                        }
+                        self.run.log(
+                            log,
                             step=ep + 1,
                         )
                     pbar.set_postfix(
                         {"TLoss": f"{mean_train_loss:.2E}", "VLoss": f"{mean_val_loss:.2E}", **accs}
                     )
-                    if mean_val_loss == best_val_loss:
-                        saved_path = Path(self.log_dir) / "best.pth"
-                        self.save_model(saved_path, model, device_ids, optimizer, scaler, ep, False)
-                        # print(f"Best model saved: {saved_path}")
                     self.save_model(
                         Path(self.log_dir) / "latest.pth",
                         model,
@@ -683,24 +692,24 @@ class Model:
         self.print(f"Elapsed time: {end_time - start_time + self.total_time:.3f} seconds")
         self.total_time += end_time - start_time
         self.print("----------- Training finished -----------")
-        self.save_model(
-            Path(self.log_dir) / "latest.pth",
-            model,
-            device_ids,
-            optimizer,
-            scaler,
-            ep,
-            True,
-        )
-        self.save_model(
-            Path(self.log_dir) / "best.pth",
-            model,
-            device_ids,
-            optimizer,
-            scaler,
-            ep,
-            True,
-        )
+        # self.save_model(
+        #     Path(self.log_dir) / "latest.pth",
+        #     model,
+        #     device_ids,
+        #     optimizer,
+        #     scaler,
+        #     ep,
+        #     True,
+        # )
+        # self.save_model(
+        #     Path(self.log_dir) / "best.pth",
+        #     model,
+        #     device_ids,
+        #     optimizer,
+        #     scaler,
+        #     ep,
+        #     True,
+        # )
 
     def model_forward(self, x, y):
         if self.model.forward.__code__.co_argcount == 2:

@@ -53,8 +53,10 @@ def crop_image(img, x, y, w, h):
 
 
 def get_box(img, path, config: DatasetConfig):
-    mask = np.full(img.shape[:2], 255)
-    height, width, _ = img.shape
+    new_img = np.full_like(img, 255)
+    img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    new_img[:, :, 0] = img
+    height, width = img.shape
     txt = open(path, "r")
     lines = txt.readlines()
     for line in lines:
@@ -74,21 +76,27 @@ def get_box(img, path, config: DatasetConfig):
         y_max = int(y_yolo * height + (box_height / 2))
         if config == DatasetConfig.REAL:
             if class_label_real[cls] == "text":
-                # mask[y_min:y_max, x_min:x_max] = 50
-                img[y_min:y_max, x_min:x_max] = 255
+                new_img[y_min:y_max, x_min:x_max] = 255
             elif class_label_real[cls] in ["node", "crossing"]:
                 pass
             elif class_label_real[cls] in ["pmos", "nmos"]:
                 # mask[y_min:y_max, x_min:x_max] = 100
-                mask[y_min : int(y_min + (y_max - y_min) * 0.4), x_min:x_max] = 200
-                mask[int(y_max - (y_max - y_min) * 0.4) : y_max, x_min:x_max] = 200
+                upper_region = new_img[y_min : int(y_min + (y_max - y_min) * 0.4), x_min:x_max]
+                lower_region = new_img[int(y_max - (y_max - y_min) * 0.4) : y_max, x_min:x_max]
+                upper_region[:, :, 1] = upper_region[:, :, 0]
+                lower_region[:, :, 1] = lower_region[:, :, 0]
+                upper_region[:, :, 0] = 255
+                lower_region[:, :, 0] = 255
 
             else:
-                # mask[y_min:y_max, x_min:x_max] = 200
-                mask[y_min:y_max, x_min:x_max] = 100
+                region = new_img[y_min:y_max, x_min:x_max]
+                region[:, :, 2] = region[:, :, 0]
+                region[:, :, 0] = 255
         else:
-            mask[y_min:y_max, x_min:x_max] = 100
-    return mask
+            region = new_img[y_min:y_max, x_min:x_max]
+            region[:, :, 2] = region[:, :, 0]
+            region[:, :, 0] = 255
+    return new_img
 
 
 def get_slice(img, data, x, y, w, h, debug):
@@ -136,8 +144,7 @@ def load_data(img_name, dir, config):
     pkl_dir = dir / Path("pkl")
     txt_dir = dir / Path("labels")
     img = cv2.imread(str(image_dir / img_name))
-    mask = get_box(img, str(txt_dir / img_name.replace(".jpg", ".txt")), config)
-    processed_img = np.concatenate((img, mask[:, :, np.newaxis]), axis=2).astype(np.uint8)
+    processed_img = get_box(img, str(txt_dir / img_name.replace(".jpg", ".txt")), config)
     data = pickle.load(open(pkl_dir / img_name.replace(".jpg", ".pkl"), "rb"))
     data = list(chain.from_iterable(data.values()))
     data = np.array(data).reshape(-1, 2, 2)
@@ -147,8 +154,7 @@ def load_data(img_name, dir, config):
 def load_test_data(img, label_name, dir, config):
     dir = Path(dir)
     txt_dir = dir / Path("labels")
-    mask = get_box(img, str(txt_dir / label_name), config)
-    processed_img = np.concatenate((img, mask[:, :, np.newaxis]), axis=2).astype(np.uint8)
+    processed_img = get_box(img, str(txt_dir / label_name), config)
     return img, processed_img
 
 
