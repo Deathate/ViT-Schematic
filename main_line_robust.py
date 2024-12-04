@@ -6,6 +6,7 @@ from shapely import LineString, box, intersects
 import main_line_robust_config as config
 from Model import *
 from slice import *
+from visualizer import get_local
 
 
 def image_preprocess(img):
@@ -373,6 +374,31 @@ def ytransform(x):
     return torch.tensor(s).float()
 
 
+class CustomTransformerEncoderLayer(nn.TransformerEncoderLayer):
+    @get_local("attention_weights")
+    def forward(self, src, *args, **kwargs):
+        # This is a simplified mimic of _transformer_encoder_layer_fwd
+        norm1 = self.norm1
+        norm2 = self.norm2
+        dropout1 = self.dropout1
+        dropout2 = self.dropout2
+
+        # Self-attention block
+        src2, attention_weights = self.self_attn(
+            src, src, src, attn_mask=kwargs.get("attn_mask"), need_weights=True
+        )
+        src = src + dropout1(src2)
+        src = norm1(src)
+
+        # Feedforward network
+        src2 = self.linear2(self.dropout(self.activation(self.linear1(src))))
+        src = src + dropout2(src2)
+        src = norm2(src)
+
+        # Return attention weights along with the final output
+        return src
+
+
 class ViT_ex(nn.Module):
     def __init__(
         self,
@@ -403,7 +429,7 @@ class ViT_ex(nn.Module):
 
         self.pos_embedding = PositionalEncoding(dim)
         self.transformer = nn.TransformerEncoder(
-            nn.TransformerEncoderLayer(dim, heads, dim_ff, batch_first=True, dropout=dropout),
+            CustomTransformerEncoderLayer(dim, heads, dim_ff, batch_first=True, dropout=dropout),
             depth,
         )
 
@@ -457,7 +483,7 @@ class ViT_ex(nn.Module):
             x = self.cnn(x)
             x = self.cnn_postprocess(x)
             x += self.pos_embedding(x)
-            x = self.transformer(x)
+            x = self.transformer(x)  # Shape: torch.Size([144, 196, 256])
             tgt = repeat(self.decoder_query.weight, "d e -> n d e", n=x.shape[0])
             x = self.decoder(tgt, x)
             x = self.box_head(x)

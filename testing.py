@@ -2,6 +2,9 @@
 from collect_connection import build_connection, build_connection_v2
 
 # from main_line import *
+from visualizer import get_local
+
+get_local.activate()
 from main_line_robust import *
 from Model import *
 
@@ -406,6 +409,18 @@ def analyze_connection(
             global_connection.append(group.tolist())
 
         draw_img = draw_connection(draw_img, global_connection, False, True)
+        cache = get_local.cache
+        attention_map = cache["CustomTransformerEncoderLayer.forward"][-1]  # (144, 196, 196)
+        s = []
+        for map in attention_map:
+            heatmap_data_normalized = cv2.normalize(
+                map, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX
+            )
+            heatmap_data_normalized = heatmap_data_normalized.astype(np.uint8)
+            heatmap_colored = cv2.applyColorMap(heatmap_data_normalized, cv2.COLORMAP_JET)
+            s.append(heatmap_colored)
+        s = create_grid(s, nrow=num_column, padding=1, pad_value=127)
+        plot_images(s, 600)
         return global_connection, draw_img
 
 
@@ -420,7 +435,7 @@ if __name__ == "__main__":
         data_config = config.DatasetConfig.REAL
     else:
         data_config = config.DatasetConfig.CC
-    img_name = Path(config.TEST_DATASET_PATH + "/images/" + test_list[1])
+    img_name = Path(config.TEST_DATASET_PATH + "/images/" + test_list[2])
     img_name = img_name.with_suffix(".jpg")
     img = cv2.imread(img_name)
     label_name = img_name.name.replace(".jpg", ".txt")
@@ -445,6 +460,4 @@ if __name__ == "__main__":
         debug_cell=[-1, -1],
         debug_img_width=500,
     )
-    # plot_images(result_img, 600)
-
 # %%
