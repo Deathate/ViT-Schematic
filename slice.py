@@ -80,14 +80,12 @@ def get_box(img, path, config: DatasetConfig):
             elif class_label_real[cls] in ["node", "crossing"]:
                 pass
             elif class_label_real[cls] in ["pmos", "nmos"]:
-                # mask[y_min:y_max, x_min:x_max] = 100
                 upper_region = new_img[y_min : int(y_min + (y_max - y_min) * 0.4), x_min:x_max]
                 lower_region = new_img[int(y_max - (y_max - y_min) * 0.4) : y_max, x_min:x_max]
                 upper_region[:, :, 1] = upper_region[:, :, 0]
                 lower_region[:, :, 1] = lower_region[:, :, 0]
                 upper_region[:, :, 0] = 255
                 lower_region[:, :, 0] = 255
-
             else:
                 region = new_img[y_min:y_max, x_min:x_max]
                 region[:, :, 2] = region[:, :, 0]
