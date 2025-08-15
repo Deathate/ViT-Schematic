@@ -1,7 +1,7 @@
 # %%
 from shapely.geometry import LineString, box
 
-from main_line_robust_config import *
+from main_config import *
 from utility import *
 
 class_label_cc = dict(
@@ -55,8 +55,8 @@ def crop_image(img, x, y, w, h):
 def get_box(img, path, config: DatasetConfig):
     new_img = np.full_like(img, 255)
     img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-    new_img[:, :, 0] = img
     height, width = img.shape
+    new_img[:, :, 0] = img
     txt = open(path, "r")
     lines = txt.readlines()
     for line in lines:

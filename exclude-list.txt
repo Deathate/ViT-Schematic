@@ -4,7 +4,6 @@ custom_datasets
 wandb
 runs
 cache
-cc_deathate_data
 custom_datasets
 data_distribution_50
 test_script

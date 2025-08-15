@@ -620,12 +620,12 @@ class Model:
                         best_train_loss = mean_train_loss
                         saved_path = Path(self.log_dir) / "best_train.pth"
                         self.save_model(saved_path, model, device_ids, optimizer, scaler, ep, False)
-                        print(f"Best model saved (train): {saved_path}")
+                        pbar.write(f"  -Best model saved(train): {saved_path}")
                     if mean_val_loss < best_val_loss:
                         best_val_loss = mean_val_loss
                         saved_path = Path(self.log_dir) / "best_val.pth"
                         self.save_model(saved_path, model, device_ids, optimizer, scaler, ep, False)
-                        print(f"Best model saved (val): {saved_path}")
+                        pbar.write(f"  -Best model saved(val): {saved_path}")
 
                     self.writer.add_scalar("Loss/train", mean_train_loss, ep + 1)
                     self.writer.add_scalar("Loss/val", mean_val_loss, ep + 1)

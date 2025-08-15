@@ -5,7 +5,7 @@ from collect_connection import build_connection, build_connection_v2
 from visualizer import get_local
 
 get_local.activate()
-from main_line_robust import *
+from main import *
 from Model import *
 
 
